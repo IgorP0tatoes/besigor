@@ -87,10 +87,10 @@ export async function copyText(text: string) {
   }
 }
 
-export function CodeBlock({ code, onCopied }: { code: string; onCopied?: () => void }) {
+export function CodeBlock({ code, onCopied, wrap }: { code: string; onCopied?: () => void; wrap?: boolean }) {
   return (
     <div style={{ position: 'relative' }}>
-      <pre className="code">{code}</pre>
+      <pre className={`code ${wrap ? 'code-wrap' : ''}`}>{code}</pre>
       <button
         type="button"
         className="btn btn-sm code-copy"

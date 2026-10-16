@@ -9,6 +9,7 @@ import { config } from './config.js';
 import type { DB } from './db.js';
 import { bus, type LiveEvent } from './live.js';
 import { querySeries, RANGES, type RangeKey } from './stats.js';
+import { installCommand, installScript } from './install.js';
 import type { HostInfo } from './types.js';
 
 interface ServerRow {
@@ -63,6 +64,12 @@ export function isOutdated(agent: string | undefined, hub: string) {
 }
 
 export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, alerts: AlertEngine, probes: ProbeStore) {
+  // public: the installer holds no secrets, the token is passed as an argument
+  app.get('/install.sh', async (req, reply) => {
+    reply.header('Content-Type', 'text/x-shellscript; charset=utf-8').header('Cache-Control', 'no-cache');
+    return installScript(hubUrl(req), config.agentImage, config.version);
+  });
+
   app.register(async (api) => {
     api.addHook('preHandler', (req, reply) => requireSession(db, req, reply));
 
@@ -111,7 +118,7 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
       );
       bus.publish({ type: 'servers' });
       const url = hubUrl(req);
-      return { id, name, token, compose: agentCompose(url, token), hubUrl: url };
+      return { id, name, token, install: installCommand(url, token), compose: agentCompose(url, token), hubUrl: url };
     });
 
     api.patch<{ Params: { id: string }; Body: { name?: string } }>('/api/servers/:id', async (req, reply) => {
@@ -129,7 +136,7 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
       if (!res.changes) return reply.code(404).send({ error: 'not found' });
       agents.kick(req.params.id);
       const url = hubUrl(req);
-      return { token, compose: agentCompose(url, token), hubUrl: url };
+      return { token, install: installCommand(url, token), compose: agentCompose(url, token), hubUrl: url };
     });
 
     api.delete<{ Params: { id: string } }>('/api/servers/:id', async (req, reply) => {

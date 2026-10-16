@@ -4,29 +4,39 @@ import { api, ApiError } from '../lib/api';
 
 export interface TokenResult {
   token: string;
+  install: string;
   compose: string;
   hubUrl: string;
 }
 
 export function InstallSteps({ result }: { result: TokenResult }) {
   const [toast, show] = useToast();
+  const [manual, setManual] = useState(false);
   return (
     <>
-      <ol className="steps">
-        <li>
-          На сервере создайте папку, например <code>/opt/besigor-agent</code>, и положите в неё <code>docker-compose.yml</code>:
-        </li>
-      </ol>
-      <CodeBlock code={result.compose} onCopied={() => show('Скопировано')} />
-      <ol className="steps" start={2} style={{ marginTop: 16 }}>
-        <li>
-          Запустите: <code>docker compose up -d</code>
-        </li>
-        <li>Через несколько секунд сервер появится в&nbsp;панели.</li>
-      </ol>
-      <p className="faint" style={{ fontSize: 13, margin: 0 }}>
-        Токен показывается только сейчас. Если потеряете — выпустите новый на странице сервера.
+      <p style={{ marginBottom: 10 }}>Выполните на сервере одну команду — она поставит Docker (если его нет), скачает и запустит агента:</p>
+      <CodeBlock code={result.install} onCopied={() => show('Скопировано')} wrap />
+      <p className="faint" style={{ fontSize: 13, margin: '12px 0 0' }}>
+        Через несколько секунд сервер появится в&nbsp;панели. Токен показывается только сейчас — если потеряете, выпустите новый на странице сервера.
       </p>
+      <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 12, paddingLeft: 0 }} onClick={() => setManual((v) => !v)}>
+        {manual ? '▾' : '▸'} Вручную через docker-compose
+      </button>
+      {manual && (
+        <div style={{ marginTop: 8 }}>
+          <ol className="steps">
+            <li>
+              Создайте папку, например <code>/opt/besigor-agent</code>, и положите в неё <code>docker-compose.yml</code>:
+            </li>
+          </ol>
+          <CodeBlock code={result.compose} onCopied={() => show('Скопировано')} />
+          <ol className="steps" start={2} style={{ marginTop: 16 }}>
+            <li>
+              Запустите: <code>docker compose up -d</code>
+            </li>
+          </ol>
+        </div>
+      )}
       {toast}
     </>
   );

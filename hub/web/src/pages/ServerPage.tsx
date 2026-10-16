@@ -258,7 +258,7 @@ function Manage({ server }: { server: Server }) {
             </>
           ) : (
             <>
-              <p>Замените файл на сервере и перезапустите агента.</p>
+              <p>Выполните команду на сервере — она перезапишет настройки и перезапустит агента.</p>
               <InstallSteps result={token} />
               <div className="dialog-actions">
                 <button className="btn btn-primary" onClick={close}>
