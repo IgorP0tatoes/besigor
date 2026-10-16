@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { AgentHub } from './agents.js';
+import type { AlertEngine } from './alerts.js';
 import { requireSession, sha256 } from './auth.js';
 import { config } from './config.js';
 import type { DB } from './db.js';
@@ -59,7 +60,7 @@ export function isOutdated(agent: string | undefined, hub: string) {
   return false;
 }
 
-export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub) {
+export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, alerts: AlertEngine) {
   app.register(async (api) => {
     api.addHook('preHandler', (req, reply) => requireSession(db, req, reply));
 
@@ -133,6 +134,7 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub) {
       })();
       if (!res.changes) return reply.code(404).send({ error: 'not found' });
       agents.forget(id);
+      alerts.forget(id);
       bus.publish({ type: 'servers' });
       return { ok: true };
     });

@@ -3,12 +3,15 @@ import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import { AgentHub } from './agents.js';
+import { AlertEngine } from './alerts.js';
+import { registerAlertApi } from './api-alerts.js';
 import { registerApi } from './api.js';
 import { registerAuth } from './auth.js';
 import { startBackups } from './backup.js';
 import { config } from './config.js';
 import { openDb } from './db.js';
 import { prune, rollup } from './stats.js';
+import { TelegramBot } from './telegram.js';
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? 'info' },
@@ -18,6 +21,9 @@ const app = Fastify({
 
 const db = openDb(config.dbPath);
 const agents = new AgentHub(db, app.log);
+const bot = new TelegramBot(db, agents, app.log);
+const alerts = new AlertEngine(db, agents, bot, app.log);
+bot.alerts = alerts;
 
 await app.register(cookie, { secret: config.sessionSecret });
 
@@ -29,7 +35,8 @@ app.addHook('onSend', async (_req, reply) => {
 
 app.get('/api/health', async () => ({ ok: true, version: config.version }));
 registerAuth(app, db);
-registerApi(app, db, agents);
+registerApi(app, db, agents, alerts);
+registerAlertApi(app, db, alerts, bot);
 
 if (existsSync(config.webDir)) {
   await app.register(fastifyStatic, { root: config.webDir, wildcard: false, maxAge: '1h' });
@@ -43,6 +50,8 @@ if (existsSync(config.webDir)) {
 }
 
 agents.attach(app.server);
+alerts.start();
+void bot.start();
 
 const jobs = [
   setInterval(() => rollup(db), 60_000),
@@ -56,6 +65,8 @@ app.log.info(`besigor hub ${config.version} listening on :${config.port}`);
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, async () => {
     jobs.forEach(clearInterval);
+    alerts.stop();
+    bot.stop();
     agents.close();
     await app.close();
     db.close();

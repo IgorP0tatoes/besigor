@@ -24,6 +24,32 @@ const migrations: string[] = [
   );
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `,
+  `
+  CREATE TABLE alerts (
+    server_id TEXT NOT NULL,
+    type      TEXT NOT NULL,
+    enabled   INTEGER NOT NULL,
+    value     REAL NOT NULL,
+    minutes   INTEGER NOT NULL,
+    PRIMARY KEY (server_id, type)
+  ) WITHOUT ROWID;
+  CREATE TABLE alert_state (
+    server_id TEXT NOT NULL,
+    type      TEXT NOT NULL,
+    key       TEXT NOT NULL DEFAULT '',
+    since     INTEGER NOT NULL,
+    value     REAL,
+    PRIMARY KEY (server_id, type, key)
+  ) WITHOUT ROWID;
+  CREATE TABLE mutes (server_id TEXT PRIMARY KEY, until INTEGER);
+  CREATE TABLE recipients (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    chat_id    TEXT NOT NULL,
+    thread_id  INTEGER,
+    categories TEXT NOT NULL
+  );
+  `,
 ];
 
 export function openDb(path: string): DB {

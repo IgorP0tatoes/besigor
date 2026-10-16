@@ -24,6 +24,7 @@ export function Layout({ children, onLogout }: { children: ReactNode; onLogout: 
           <NavLink to="/" end>
             Серверы
           </NavLink>
+          <NavLink to="/settings">Уведомления</NavLink>
         </nav>
         <div className="topbar-right">
           {servers.length > 0 && (

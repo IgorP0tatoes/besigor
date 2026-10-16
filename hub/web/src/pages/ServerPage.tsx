@@ -9,6 +9,7 @@ import { bitsParts, bytesParts, fmtAgo, fmtBits, fmtBytes, fmtNumber, fmtRate, f
 import { useHub } from '../lib/hub';
 import type { RangeKey, Series, Server } from '../lib/types';
 import { InstallSteps, type TokenResult } from './AddServer';
+import { AlertsPanel } from './AlertsPanel';
 import { worstDisk } from './Dashboard';
 
 const RANGES: { key: RangeKey; label: string }[] = [
@@ -377,6 +378,7 @@ export function ServerPage() {
       </div>
       {series ? <Charts s={series} /> : <div className="charts" style={{ minHeight: 300 }} />}
 
+      <AlertsPanel serverId={server.id} />
       <Manage server={server} />
     </main>
   );
