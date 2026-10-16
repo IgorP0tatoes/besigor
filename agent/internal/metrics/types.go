@@ -30,7 +30,7 @@ type NetIface struct {
 }
 
 // Sample is both the live 10s snapshot and the per-minute record.
-// See docs/protocol.md for the meaning of rate vs. byte fields.
+// Live samples carry rates (bytes/s); minute records carry byte totals for rx/tx.
 type Sample struct {
 	TS           int64      `json:"ts"`
 	CPU          float64    `json:"cpu"`

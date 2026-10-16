@@ -124,8 +124,6 @@ sequenceDiagram
 
 **Сетевые проверки** выполняет агент того сервера, к которому они добавлены. Список проверок хаб присылает агенту сообщением `config` при подключении и при каждом изменении. Результаты копятся у агента и тоже досылаются после обрыва.
 
-Полное описание формата сообщений: [docs/protocol.md](docs/protocol.md).
-
 ---
 
 ## Требования
@@ -481,7 +479,6 @@ agent/            Go-агент: метрики (/proc, /sys), Docker, сете�
 hub/server/       Node.js 22 + TypeScript: Fastify, ws, better-sqlite3, алерты, Telegram
 hub/web/          панель: React + Vite + uPlot
 deploy/           compose-файлы хаба и агента, примеры конфигов Caddy и nginx
-docs/protocol.md  протокол агент ↔ хаб
 ```
 
 Сборка и тесты (нужен только Docker):

@@ -1,4 +1,4 @@
-// Mirrors agent/internal/metrics/types.go — see docs/protocol.md.
+// Mirrors agent/internal/metrics/types.go.
 
 export interface HostInfo {
   version: string;

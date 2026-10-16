@@ -7,7 +7,7 @@ import (
 )
 
 // MinuteAggregator folds 10-second intervals into one record per wall-clock
-// minute (see docs/protocol.md for units).
+// minute: averages for gauges and rates, byte totals for traffic counters.
 type MinuteAggregator struct {
 	bucket int64
 	n      int

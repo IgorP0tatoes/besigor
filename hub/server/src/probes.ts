@@ -15,7 +15,7 @@ export interface Probe {
   dnsServer: string | null;
 }
 
-/** One check as reported by the agent (docs/protocol.md). */
+/** One check as reported by the agent. */
 export interface ProbeResult {
   id: string;
   ts: number;
