@@ -37,33 +37,53 @@ const TYPES: { key: ProbeType; label: string; hint: string }[] = [
   { key: 'dns', label: 'DNS', hint: 'Резолвится ли имя' },
 ];
 
-const INTERVALS = [10, 30, 60, 300];
 const fmtMs = (v: number) => `${fmtNumber(v, v >= 100 ? 0 : 1)} мс`;
 const fmtLoss = (v: number) => `${fmtNumber(v, 0)} %`;
 
+/** Splits a pasted list: one target per line, commas and spaces also work. */
+function parseTargets(text: string) {
+  return [...new Set(text.split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean))];
+}
+
 function ProbeForm({ serverId, probe, onDone }: { serverId: string; probe?: Probe; onDone: () => void }) {
   const [type, setType] = useState<ProbeType>(probe?.type ?? 'icmp');
-  const [target, setTarget] = useState(probe?.target ?? '');
+  const [targets, setTargets] = useState(probe?.target ?? '');
   const [port, setPort] = useState(probe?.port ? String(probe.port) : '443');
-  const [interval, setIntervalSec] = useState(probe?.interval ?? 60);
+  const [interval, setIntervalSec] = useState(String(probe?.interval ?? 60));
   const [dnsServer, setDnsServer] = useState(probe?.dnsServer ?? '');
   const [name, setName] = useState(probe?.name ?? '');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const list = parseTargets(targets);
+  const many = !probe && list.length > 1;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
-    const body = { type, target, port: Number(port), interval, dnsServer, name };
+    const sec = Number(interval);
+    if (!Number.isInteger(sec) || sec < 10 || sec > 3600) return setError('Интервал — целое число секунд от 10 до 3600');
+    setBusy(true);
+    const body = { type, port: Number(port), interval: sec, dnsServer, name };
     try {
-      if (probe) await api(`/api/probes/${probe.id}`, { method: 'PUT', json: body });
-      else await api(`/api/servers/${serverId}/probes`, { method: 'POST', json: body });
+      if (probe) await api(`/api/probes/${probe.id}`, { method: 'PUT', json: { ...body, target: list[0] ?? '' } });
+      else await api(`/api/servers/${serverId}/probes`, { method: 'POST', json: { ...body, targets: list } });
       onDone();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось сохранить');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const placeholder = type === 'http' ? 'https://example.com/health' : type === 'dns' ? 'example.com' : 'example.com или 1.2.3.4';
+  const placeholder =
+    type === 'http'
+      ? 'https://example.com/health'
+      : type === 'tcp'
+        ? 'example.com\n1.2.3.4:8443'
+        : type === 'dns'
+          ? 'example.com'
+          : 'example.com\n1.2.3.4';
   return (
     <Dialog onClose={onDone} label="Проверка">
       <form onSubmit={submit}>
@@ -76,14 +96,21 @@ function ProbeForm({ serverId, probe, onDone }: { serverId: string; probe?: Prob
             </button>
           ))}
         </div>
-        <div className="form-grid">
-          <div className="field" style={{ gridColumn: type === 'tcp' ? undefined : '1 / -1' }}>
-            <label>{type === 'http' ? 'Адрес' : type === 'dns' ? 'Имя' : 'Хост'}</label>
-            <input className="input num" value={target} onChange={(e) => setTarget(e.target.value)} placeholder={placeholder} required autoFocus />
+        <div className="probe-form">
+          <div className="field full">
+            <label>
+              {type === 'http' ? 'Адреса' : type === 'dns' ? 'Имена' : 'Хосты'}
+              {!probe && <span className="faint"> — по одному в строке, для каждого будет своя проверка</span>}
+            </label>
+            {probe ? (
+              <input className="input num" value={targets} onChange={(e) => setTargets(e.target.value)} placeholder={placeholder.split('\n')[0]} required autoFocus />
+            ) : (
+              <textarea className="input num textarea" rows={4} value={targets} onChange={(e) => setTargets(e.target.value)} placeholder={placeholder} required autoFocus />
+            )}
           </div>
           {type === 'tcp' && (
             <div className="field">
-              <label>Порт</label>
+              <label>Порт{!probe && <span className="faint"> (если не указан у хоста)</span>}</label>
               <input className="input num" value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" required />
             </div>
           )}
@@ -94,19 +121,15 @@ function ProbeForm({ serverId, probe, onDone }: { serverId: string; probe?: Prob
             </div>
           )}
           <div className="field">
-            <label>Название</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="По умолчанию — цель" />
+            <label>Интервал, секунд</label>
+            <input className="input num" value={interval} onChange={(e) => setIntervalSec(e.target.value)} inputMode="numeric" placeholder="60" required />
           </div>
-          <div className="field">
-            <label>Как часто</label>
-            <div className="segmented" role="group" aria-label="Интервал">
-              {INTERVALS.map((i) => (
-                <button type="button" key={i} aria-pressed={interval === i} onClick={() => setIntervalSec(i)}>
-                  {i < 60 ? `${i} с` : `${i / 60} мин`}
-                </button>
-              ))}
+          {!many && (
+            <div className="field">
+              <label>Название</label>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="По умолчанию — цель" />
             </div>
-          </div>
+          )}
         </div>
         <div className="form-error" style={{ marginTop: 10 }}>
           {error}
@@ -115,7 +138,9 @@ function ProbeForm({ serverId, probe, onDone }: { serverId: string; probe?: Prob
           <button type="button" className="btn btn-ghost" onClick={onDone}>
             Отмена
           </button>
-          <button className="btn btn-primary">{probe ? 'Сохранить' : 'Добавить'}</button>
+          <button className="btn btn-primary" disabled={busy || !list.length}>
+            {probe ? 'Сохранить' : many ? `Добавить ${list.length}` : 'Добавить'}
+          </button>
         </div>
       </form>
     </Dialog>
@@ -209,7 +234,7 @@ export function Probes({ serverId, range }: { serverId: string; range: RangeKey 
                   <b>{p.name}</b>
                   <span className="faint num">
                     {TYPES.find((t) => t.key === p.type)?.label} · {p.target}
-                    {p.port ? `:${p.port}` : ''} · каждые {p.interval < 60 ? `${p.interval} с` : `${p.interval / 60} мин`}
+                    {p.port ? `:${p.port}` : ''} · каждые {p.interval} с
                   </span>
                 </div>
                 <div className="probe-tags">

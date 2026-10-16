@@ -60,7 +60,8 @@ export function validateProbe(b: Partial<Probe>): Omit<Probe, 'id' | 'serverId'>
   if (type !== 'http' && !/^[\w.:-]+$/.test(target)) return 'Укажите домен или IP-адрес без схемы и пути';
   const port = type === 'tcp' ? Number(b.port) : null;
   if (type === 'tcp' && (!Number.isInteger(port) || port! < 1 || port! > 65535)) return 'Укажите порт от 1 до 65535';
-  const interval = Math.min(3600, Math.max(10, Math.round(Number(b.interval) || 60)));
+  const interval = Math.round(Number(b.interval) || 60);
+  if (interval < 10 || interval > 3600) return 'Интервал — от 10 до 3600 секунд';
   const dnsServer = type === 'dns' && b.dnsServer ? String(b.dnsServer).trim().slice(0, 100) : null;
   const name = String(b.name ?? '').trim().slice(0, 64) || (type === 'tcp' ? `${target}:${port}` : target);
   return { name, type, target, port, interval, dnsServer };

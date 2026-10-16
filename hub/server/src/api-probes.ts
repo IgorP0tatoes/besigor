@@ -16,14 +16,29 @@ export function registerProbeApi(app: FastifyInstance, db: DB, probes: ProbeStor
 
     api.get<{ Params: { id: string } }>('/api/servers/:id/probes', async (req) => probes.list(req.params.id).map(view));
 
-    api.post<{ Params: { id: string }; Body: Partial<Probe> }>('/api/servers/:id/probes', async (req, reply) => {
+    // Several targets at once: one probe per target, all validated before any is saved.
+    // For TCP a target may carry its own port ("host:443").
+    api.post<{ Params: { id: string }; Body: Partial<Probe> & { targets?: string[] } }>('/api/servers/:id/probes', async (req, reply) => {
       if (!db.prepare('SELECT 1 FROM servers WHERE id = ?').get(req.params.id)) return reply.code(404).send({ error: 'not found' });
-      if (probes.list(req.params.id).length >= 50) return reply.code(400).send({ error: 'Не больше 50 проверок на сервер' });
-      const p = validateProbe(req.body ?? {});
-      if (typeof p === 'string') return reply.code(400).send({ error: p });
-      const id = probes.create(req.params.id, p);
+      const body = req.body ?? {};
+      const targets = (body.targets ?? [body.target ?? '']).map((t) => String(t).trim()).filter(Boolean);
+      if (!targets.length) return reply.code(400).send({ error: 'Укажите хотя бы одну цель' });
+      if (probes.list(req.params.id).length + targets.length > 50) return reply.code(400).send({ error: 'Не больше 50 проверок на сервер' });
+      const valid: Omit<Probe, 'id' | 'serverId'>[] = [];
+      for (const t of targets) {
+        const m = body.type === 'tcp' ? /^(.+):(\d{1,5})$/.exec(t) : null;
+        const p = validateProbe({
+          ...body,
+          target: m ? m[1] : t,
+          port: m ? Number(m[2]) : body.port,
+          name: targets.length > 1 ? '' : body.name,
+        });
+        if (typeof p === 'string') return reply.code(400).send({ error: `${t}: ${p}` });
+        valid.push(p);
+      }
+      const ids = db.transaction(() => valid.map((p) => probes.create(req.params.id, p)))();
       agents.pushConfig(req.params.id);
-      return view(probes.get(id)!);
+      return ids.map((id) => view(probes.get(id)!));
     });
 
     api.put<{ Params: { pid: string }; Body: Partial<Probe> }>('/api/probes/:pid', async (req, reply) => {
