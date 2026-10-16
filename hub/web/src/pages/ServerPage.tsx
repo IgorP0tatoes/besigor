@@ -11,6 +11,7 @@ import type { RangeKey, Series, Server } from '../lib/types';
 import { InstallSteps, type TokenResult } from './AddServer';
 import { AlertsPanel } from './AlertsPanel';
 import { Containers } from './Containers';
+import { Probes } from './Probes';
 import { worstDisk } from './Dashboard';
 
 const RANGES: { key: RangeKey; label: string }[] = [
@@ -395,6 +396,7 @@ export function ServerPage() {
       {server.live?.containers && server.live.containers.length > 0 && (
         <Containers serverId={server.id} list={server.live.containers} online={server.online} />
       )}
+      <Probes serverId={server.id} range={range} />
       <AlertsPanel serverId={server.id} />
       <Manage server={server} />
     </main>

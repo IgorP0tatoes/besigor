@@ -1482,3 +1482,67 @@ input[type='range']:disabled {
   flex: none;
   color: rgba(169, 156, 255, 0.55);
 }
+
+/* ---------- probes ---------- */
+
+.probes {
+  margin-top: 16px;
+  padding: 20px;
+}
+
+.probes .chart-head .btn {
+  margin-left: 12px;
+}
+
+.probe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
+  gap: 12px;
+}
+
+.probe {
+  padding: 14px 16px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+  min-width: 0;
+}
+
+.probe-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.probe-title {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.probe-title b {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.probe-title .faint {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.probe-tags,
+.probe-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.probe-uptime {
+  font-size: 12px;
+  margin: 2px 0 8px;
+}

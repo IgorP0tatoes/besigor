@@ -3,6 +3,7 @@ import type { AgentHub } from './agents.js';
 import type { DB } from './db.js';
 import { fmtNum, fmtDuration, esc } from './text.js';
 import { bus } from './live.js';
+import type { ProbeStore } from './probes.js';
 import type { Container, HostInfo, Sample } from './types.js';
 
 export type Category = 'offline' | 'resources' | 'traffic' | 'containers' | 'probes';
@@ -14,7 +15,10 @@ export const CATEGORIES: Record<Category, string> = {
   probes: 'Сетевые проверки',
 };
 
-export type AlertType = 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net' | 'container_down' | 'container_restarts';
+export type AlertType =
+  | 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net'
+  | 'container_down' | 'container_restarts'
+  | 'probe_down' | 'probe_latency' | 'probe_loss' | 'cert_expiry';
 
 interface AlertDef {
   label: string;
@@ -22,6 +26,8 @@ interface AlertDef {
   unit: string;
   /** status has no value, only a duration */
   hasValue: boolean;
+  /** probe_down and cert_expiry have no duration */
+  hasMinutes?: boolean;
   min: number;
   max: number;
   step: number;
@@ -38,6 +44,10 @@ export const ALERT_DEFS: Record<AlertType, AlertDef> = {
   net: { label: 'Сетевой трафик', category: 'traffic', unit: 'Мбит/с', hasValue: true, min: 1, max: 10000, step: 1, maxMinutes: 60, defaults: { enabled: false, value: 100, minutes: 10 } },
   container_down: { label: 'Контейнер остановился', category: 'containers', unit: '', hasValue: false, min: 0, max: 0, step: 0, maxMinutes: 30, defaults: { enabled: true, value: 0, minutes: 1 } },
   container_restarts: { label: 'Рестарты контейнера', category: 'containers', unit: 'раз', hasValue: true, min: 1, max: 20, step: 1, maxMinutes: 60, defaults: { enabled: true, value: 3, minutes: 10 } },
+  probe_down: { label: 'Цель проверки недоступна', category: 'probes', unit: 'подряд', hasValue: true, hasMinutes: false, min: 1, max: 10, step: 1, maxMinutes: 1, defaults: { enabled: true, value: 3, minutes: 1 } },
+  cert_expiry: { label: 'Сертификат истекает', category: 'probes', unit: 'дн', hasValue: true, hasMinutes: false, min: 1, max: 60, step: 1, maxMinutes: 1, defaults: { enabled: true, value: 14, minutes: 1 } },
+  probe_latency: { label: 'Время ответа', category: 'probes', unit: 'мс', hasValue: true, min: 10, max: 5000, step: 10, maxMinutes: 60, defaults: { enabled: false, value: 500, minutes: 5 } },
+  probe_loss: { label: 'Потери пакетов', category: 'probes', unit: '%', hasValue: true, min: 1, max: 100, step: 1, maxMinutes: 60, defaults: { enabled: false, value: 20, minutes: 5 } },
 };
 
 export const ALERT_TYPES = Object.keys(ALERT_DEFS) as AlertType[];
@@ -132,6 +142,10 @@ function fmtMetric(type: AlertType, v: number) {
 
 const HISTORY_SECONDS = 3600;
 
+function avgOf(values: number[]): number | null {
+  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+}
+
 /** Evaluates thresholds over the live stream and reports state changes. */
 export class AlertEngine {
   private history = new Map<string, Sample[]>();
@@ -140,6 +154,7 @@ export class AlertEngine {
   private downSince = new Map<string, number>();
   /** restart counters over time, per server|container */
   private restarts = new Map<string, { ts: number; id: string; count: number }[]>();
+  probes?: ProbeStore;
   private timer?: NodeJS.Timeout;
   private off?: () => void;
 
@@ -296,6 +311,64 @@ export class AlertEngine {
     }
   }
 
+  private checkProbes(serverId: string, name: string, cfg: AlertConfig[], now: number) {
+    if (!this.probes) return;
+    const conf = (t: AlertType) => cfg.find((c) => c.type === t)!;
+    const down = conf('probe_down');
+    const latency = conf('probe_latency');
+    const loss = conf('probe_loss');
+    const cert = conf('cert_expiry');
+    for (const p of this.probes.list(serverId)) {
+      const st = this.probes.stateOf(p.id);
+      if (!st.last) continue;
+      const title = `${name}: «${esc(p.name)}»`;
+
+      const isDown = this.state(serverId, 'probe_down', p.id);
+      if (down.enabled && !isDown && st.fails >= down.value) {
+        this.fire(serverId, 'probe_down', now, st.fails, p.id);
+        this.send(serverId, 'probes', `📡 ${title} не отвечает · ${esc(st.last.error ?? 'ошибка')}`);
+      } else if (isDown && st.fails === 0) {
+        this.resolve(serverId, 'probe_down', p.id);
+        this.send(serverId, 'probes', `✅ ${title} снова отвечает · ${fmtNum(st.last.ms, 0)}\u00a0мс`);
+      }
+
+      for (const [c, metricOf, unit] of [
+        [latency, (rs: typeof st.recent) => avgOf(rs.filter((r) => r.ok).map((r) => r.ms)), 'мс'],
+        [loss, (rs: typeof st.recent) => avgOf(rs.map((r) => r.loss)), '%'],
+      ] as const) {
+        const firing = this.state(serverId, c.type, p.id);
+        const from = now - c.minutes * 60;
+        const window = st.recent.filter((r) => r.ts >= from);
+        if (!window.length || window[0]!.ts > from + p.interval + 5) {
+          if (firing && !c.enabled) this.resolve(serverId, c.type, p.id);
+          continue;
+        }
+        const v = metricOf(window);
+        if (v === null) continue;
+        if (c.enabled && !firing && v > c.value) {
+          this.fire(serverId, c.type, now, v, p.id);
+          this.send(serverId, 'probes', `⚠️ ${title}: ${ALERT_DEFS[c.type].label.toLowerCase()} ${fmtNum(v, 0)}\u00a0${unit} · порог ${fmtNum(c.value, 0)}\u00a0${unit}`);
+        } else if (firing && v <= c.value) {
+          this.resolve(serverId, c.type, p.id);
+          this.send(serverId, 'probes', `✅ ${title}: ${ALERT_DEFS[c.type].label.toLowerCase()} в норме · ${fmtNum(v, 0)}\u00a0${unit}`);
+        }
+      }
+
+      const expires = st.last.certExpires;
+      const certFiring = this.state(serverId, 'cert_expiry', p.id);
+      if (expires && cert.enabled) {
+        const days = (expires - now) / 86400;
+        if (!certFiring && days < cert.value) {
+          this.fire(serverId, 'cert_expiry', now, days, p.id);
+          this.send(serverId, 'probes', `🔐 ${title}: сертификат истекает через ${fmtNum(Math.max(0, days), 0)}\u00a0дн`);
+        } else if (certFiring && days >= cert.value) {
+          this.resolve(serverId, 'cert_expiry', p.id);
+          this.send(serverId, 'probes', `✅ ${title}: сертификат обновлён · ещё ${fmtNum(days, 0)}\u00a0дн`);
+        }
+      }
+    }
+  }
+
   private checkServer(srv: { id: string; name: string; host_info: string | null; last_seen: number | null }, now: number) {
     const cfg = getAlerts(this.db, srv.id);
     const name = `<b>${esc(srv.name)}</b>`;
@@ -315,8 +388,9 @@ export class AlertEngine {
     const hist = this.history.get(srv.id) ?? [];
     const cores = srv.host_info ? (JSON.parse(srv.host_info) as HostInfo).cores : 1;
     this.checkContainers(srv.id, name, hist.at(-1)?.containers, cfg, now);
+    this.checkProbes(srv.id, name, cfg, now);
     for (const c of cfg) {
-      if (c.type === 'status' || c.type.startsWith('container') || !c.enabled) continue;
+      if (c.type === 'status' || c.type.startsWith('container') || c.type.startsWith('probe') || c.type === 'cert_expiry' || !c.enabled) continue;
       const def = ALERT_DEFS[c.type];
       const from = now - c.minutes * 60;
       const window = hist.filter((s) => s.ts >= from);

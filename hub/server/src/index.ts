@@ -5,11 +5,13 @@ import Fastify from 'fastify';
 import { AgentHub } from './agents.js';
 import { AlertEngine } from './alerts.js';
 import { registerAlertApi } from './api-alerts.js';
+import { registerProbeApi } from './api-probes.js';
 import { registerApi } from './api.js';
 import { registerAuth } from './auth.js';
 import { startBackups } from './backup.js';
 import { config } from './config.js';
 import { openDb } from './db.js';
+import { ProbeStore } from './probes.js';
 import { prune, rollup } from './stats.js';
 import { TelegramBot } from './telegram.js';
 
@@ -21,9 +23,12 @@ const app = Fastify({
 
 const db = openDb(config.dbPath);
 const agents = new AgentHub(db, app.log);
+const probes = new ProbeStore(db);
+agents.probes = probes;
 const bot = new TelegramBot(db, agents, app.log);
 const alerts = new AlertEngine(db, agents, bot, app.log);
 bot.alerts = alerts;
+alerts.probes = probes;
 
 await app.register(cookie, { secret: config.sessionSecret });
 
@@ -35,8 +40,9 @@ app.addHook('onSend', async (_req, reply) => {
 
 app.get('/api/health', async () => ({ ok: true, version: config.version }));
 registerAuth(app, db);
-registerApi(app, db, agents, alerts);
+registerApi(app, db, agents, alerts, probes);
 registerAlertApi(app, db, alerts, bot);
+registerProbeApi(app, db, probes, agents);
 
 if (existsSync(config.webDir)) {
   await app.register(fastifyStatic, { root: config.webDir, wildcard: false, maxAge: '1h' });
@@ -54,8 +60,14 @@ alerts.start();
 void bot.start();
 
 const jobs = [
-  setInterval(() => rollup(db), 60_000),
-  setInterval(() => prune(db), 3600_000),
+  setInterval(() => {
+    rollup(db);
+    probes.rollup();
+  }, 60_000),
+  setInterval(() => {
+    prune(db);
+    probes.prune();
+  }, 3600_000),
 ];
 startBackups(db, config.dataDir, app.log);
 

@@ -7,6 +7,7 @@ import { sha256 } from './auth.js';
 import type { DB } from './db.js';
 import { bus } from './live.js';
 import { clientIpFrom } from './net.js';
+import type { ProbeResult, ProbeStore } from './probes.js';
 import { insertMinutes } from './stats.js';
 import type { Envelope, HostInfo, Sample } from './types.js';
 
@@ -42,6 +43,7 @@ export class AgentHub {
   private latest = new Map<string, Sample>();
   private wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });
   private timer?: NodeJS.Timeout;
+  probes?: ProbeStore;
 
   constructor(
     private db: DB,
@@ -70,6 +72,12 @@ export class AgentHub {
 
   isOnline(serverId: string) {
     return this.conns.has(serverId);
+  }
+
+  /** Sends the current probe list to a connected agent. */
+  pushConfig(serverId: string) {
+    const conn = this.conns.get(serverId);
+    if (conn && this.probes) conn.ws.send(JSON.stringify({ t: 'config', d: { interval: 10, probes: this.probes.agentConfig(serverId) } }));
   }
 
   /** Drops the agent of a deleted server or a rotated token. */
@@ -161,6 +169,7 @@ export class AgentHub {
         const host = env.d as HostInfo;
         this.db.prepare('UPDATE servers SET host_info = ? WHERE id = ?').run(JSON.stringify(host), serverId);
         bus.publish({ type: 'hello', serverId, host });
+        this.pushConfig(serverId);
         break;
       }
       case 'live': {
@@ -168,6 +177,12 @@ export class AgentHub {
         this.latest.set(serverId, sample);
         this.touch(serverId);
         bus.publish({ type: 'live', serverId, sample });
+        break;
+      }
+      case 'probe': {
+        const results = (Array.isArray(env.d) ? env.d : []).slice(-2000) as ProbeResult[];
+        this.probes?.ingest(serverId, results);
+        if (results.length) bus.publish({ type: 'probe', serverId });
         break;
       }
       case 'logs.data': {

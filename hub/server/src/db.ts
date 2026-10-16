@@ -50,6 +50,22 @@ const migrations: string[] = [
     categories TEXT NOT NULL
   );
   `,
+  `
+  CREATE TABLE probes (
+    id         TEXT PRIMARY KEY,
+    server_id  TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    target     TEXT NOT NULL,
+    port       INTEGER,
+    interval   INTEGER NOT NULL,
+    dns_server TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX probes_server ON probes (server_id);
+  CREATE TABLE probe_1m (probe_id TEXT NOT NULL, ts INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (probe_id, ts)) WITHOUT ROWID;
+  CREATE TABLE probe_1h (probe_id TEXT NOT NULL, ts INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (probe_id, ts)) WITHOUT ROWID;
+  `,
 ];
 
 export function openDb(path: string): DB {

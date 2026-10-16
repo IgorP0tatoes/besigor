@@ -3,12 +3,16 @@ import { useToast } from '../components/ui';
 import { api } from '../lib/api';
 import { fmtNumber } from '../lib/format';
 
-export type AlertType = 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net' | 'container_down' | 'container_restarts';
+export type AlertType =
+  | 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net'
+  | 'container_down' | 'container_restarts'
+  | 'probe_down' | 'probe_latency' | 'probe_loss' | 'cert_expiry';
 
 interface AlertDef {
   label: string;
   unit: string;
   hasValue: boolean;
+  hasMinutes?: boolean;
   min: number;
   max: number;
   step: number;
@@ -31,6 +35,10 @@ const HINTS: Record<AlertType, string> = {
   net: 'Входящий + исходящий',
   container_down: 'Был запущен и остановился',
   container_restarts: 'Рестартов за период',
+  probe_down: 'Неудачных проверок подряд',
+  probe_latency: 'Среднее время ответа',
+  probe_loss: 'Доля потерянных проверок',
+  cert_expiry: 'Осталось дней до истечения',
 };
 
 let defsCache: Record<AlertType, AlertDef> | null = null;
@@ -74,11 +82,13 @@ function AlertRow({ serverId, def, cfg, onChange, onApplyAll }: { serverId: stri
             <b className="num">{fmtValue(def, local.value)}</b>
           </div>
         )}
+        {def.hasMinutes !== false && (
         <div className="slider">
           <span className="faint">{def.hasValue ? 'Дольше' : 'Через'}</span>
           <input type="range" min={1} max={def.maxMinutes} step={1} value={local.minutes} disabled={!local.enabled} onChange={(e) => update({ minutes: Number(e.target.value) })} style={{ '--p': `${((local.minutes - 1) / (def.maxMinutes - 1)) * 100}%` } as CSSProperties} />
           <b className="num">{local.minutes}&nbsp;мин</b>
         </div>
+        )}
       </div>
       <button className="btn btn-ghost btn-sm" title="Применить эту настройку ко всем серверам" onClick={() => onApplyAll(local)}>
         Ко всем

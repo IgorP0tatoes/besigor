@@ -5,6 +5,7 @@ export type LiveEvent =
   | { type: 'live'; serverId: string; sample: Sample }
   | { type: 'status'; serverId: string; online: boolean; at: number }
   | { type: 'hello'; serverId: string; host: HostInfo }
+  | { type: 'probe'; serverId: string }
   | { type: 'servers' };
 
 /** In-process fan-out of agent events to panel subscribers (SSE) and alerts. */

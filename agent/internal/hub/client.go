@@ -17,6 +17,7 @@ import (
 
 	"github.com/IgorP0tatoes/besigor/agent/internal/docker"
 	"github.com/IgorP0tatoes/besigor/agent/internal/metrics"
+	"github.com/IgorP0tatoes/besigor/agent/internal/probes"
 )
 
 type envelope struct {
@@ -31,6 +32,9 @@ type Client struct {
 	Hello   func() metrics.HostInfo
 	Buffer  *Buffer
 	Docker  *docker.Client // nil when Docker is unavailable
+	Probes  *probes.Manager
+
+	rootCtx context.Context // probes outlive single connections
 
 	mu   sync.Mutex
 	conn *websocket.Conn
@@ -67,6 +71,7 @@ func AgentURL(raw string) (string, error) {
 
 // Run keeps a connection to the hub open until ctx is cancelled.
 func (c *Client) Run(ctx context.Context) {
+	c.rootCtx = ctx
 	backoff := time.Second
 	for ctx.Err() == nil {
 		started := time.Now()
@@ -177,7 +182,12 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) error {
 				c.stopLogs(r.Req)
 			}
 		case "config":
-			// reserved for probes (stage 8)
+			var cfg struct {
+				Probes []probes.Config `json:"probes"`
+			}
+			if json.Unmarshal(env.D, &cfg) == nil && c.Probes != nil {
+				c.Probes.Sync(c.rootCtx, cfg.Probes)
+			}
 		}
 	}
 }
@@ -265,6 +275,18 @@ func (c *Client) send(ctx context.Context, t string, d any) error {
 // SendLive pushes the 10s snapshot; it is dropped while disconnected.
 func (c *Client) SendLive(ctx context.Context, s metrics.Sample) {
 	_ = c.send(ctx, "live", s)
+}
+
+// SendProbes delivers probe results, keeping them for later when offline.
+func (c *Client) SendProbes(ctx context.Context) {
+	if c.Probes == nil {
+		return
+	}
+	if rs := c.Probes.Drain(); len(rs) > 0 {
+		if err := c.send(ctx, "probe", rs); err != nil {
+			c.Probes.Requeue(rs)
+		}
+	}
 }
 
 // SendPending pushes every unacknowledged minute record.

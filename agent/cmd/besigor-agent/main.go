@@ -14,6 +14,7 @@ import (
 	"github.com/IgorP0tatoes/besigor/agent/internal/docker"
 	"github.com/IgorP0tatoes/besigor/agent/internal/hub"
 	"github.com/IgorP0tatoes/besigor/agent/internal/metrics"
+	"github.com/IgorP0tatoes/besigor/agent/internal/probes"
 )
 
 var version = "dev"
@@ -53,7 +54,7 @@ func main() {
 		slog.Info("docker socket not found, container monitoring disabled")
 	}
 	client := &hub.Client{
-		URL: hubURL, Token: token, Version: version, Buffer: &hub.Buffer{}, Docker: dk,
+		URL: hubURL, Token: token, Version: version, Buffer: &hub.Buffer{}, Docker: dk, Probes: probes.NewManager(),
 		Hello: func() metrics.HostInfo { return metrics.ReadHostInfo(paths, version) },
 	}
 	go client.Run(ctx)
@@ -83,6 +84,7 @@ func main() {
 			}
 		}
 		client.SendLive(ctx, iv.Live)
+		client.SendProbes(ctx)
 		if rec, ok := agg.Add(iv); ok {
 			client.Buffer.Push(rec)
 			client.SendPending(ctx)
