@@ -112,7 +112,7 @@ function LogsDialog({ serverId, name, onClose }: { serverId: string; name: strin
   );
 }
 
-export function Containers({ serverId, list, online }: { serverId: string; list: Container[]; online: boolean }) {
+export function Containers({ serverId, list, online, logs: logsAllowed = true }: { serverId: string; list: Container[]; online: boolean; logs?: boolean }) {
   const [logs, setLogs] = useState<string | null>(null);
   const sorted = [...list].sort((a, b) => Number(b.state === 'running') - Number(a.state === 'running') || a.name.localeCompare(b.name));
   const running = list.filter((c) => c.state === 'running').length;
@@ -154,7 +154,7 @@ export function Containers({ serverId, list, online }: { serverId: string; list:
                 <td className={`r num ${c.restarts > 0 ? 'warn-text' : ''}`}>{c.restarts}</td>
                 <td className="r num">{c.state === 'running' && c.started ? fmtUptime(now - c.started) : '—'}</td>
                 <td className="r">
-                  <button className="btn btn-sm" disabled={!online} onClick={() => setLogs(c.name)}>
+                  <button className="btn btn-sm" disabled={!online || !logsAllowed} title={logsAllowed ? undefined : 'Доступ к Docker выключен'} onClick={() => setLogs(c.name)}>
                     Логи
                   </button>
                 </td>

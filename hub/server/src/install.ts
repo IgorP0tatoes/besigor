@@ -3,14 +3,15 @@
 // The script carries the hub URL and image; the token comes as an argument,
 // so the script itself holds no secrets and is the same for every server.
 
-export function installCommand(hubUrl: string, token: string) {
-  return `curl -fsSL ${hubUrl}/install.sh | sudo bash -s -- --token ${token}`;
+export function installCommand(hubUrl: string, token: string, docker = true) {
+  return `curl -fsSL ${hubUrl}/install.sh | sudo bash -s -- --token ${token}${docker ? '' : ' --no-containers'}`;
 }
 
 export function installScript(hubUrl: string, image: string, version: string) {
   return `#!/usr/bin/env bash
 # besigor agent installer — ${hubUrl}
 #   install / update:  curl -fsSL ${hubUrl}/install.sh | sudo bash -s -- --token <TOKEN>
+#   without access to Docker containers: add --no-containers
 #   remove:            curl -fsSL ${hubUrl}/install.sh | sudo bash -s -- --uninstall
 set -euo pipefail
 
@@ -20,6 +21,7 @@ DIR="/opt/besigor-agent"
 NAME="besigor-agent"
 TOKEN=""
 UNINSTALL=0
+CONTAINERS=1
 
 say()  { printf '\\033[1;35m›\\033[0m %s\\n' "$*"; }
 ok()   { printf '\\033[1;32m✓\\033[0m %s\\n' "$*"; }
@@ -30,6 +32,7 @@ while [ $# -gt 0 ]; do
     --token) TOKEN="\${2:-}"; shift 2 ;;
     --token=*) TOKEN="\${1#*=}"; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
+    --no-containers) CONTAINERS=0; shift ;;
     -h|--help) sed -n '2,4p' "$0" 2>/dev/null || true; exit 0 ;;
     *) fail "Неизвестный параметр: $1" ;;
   esac
@@ -68,6 +71,13 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 docker info >/dev/null 2>&1 || fail "Docker установлен, но не запущен (systemctl start docker)"
 
+SOCK_VOLUME=""
+SOCK_ARG=()
+if [ "$CONTAINERS" -eq 1 ]; then
+  SOCK_VOLUME="      - /var/run/docker.sock:/var/run/docker.sock:ro"
+  SOCK_ARG=(-v /var/run/docker.sock:/var/run/docker.sock:ro)
+fi
+
 say "Готовлю $DIR"
 mkdir -p "$DIR"
 umask 077
@@ -86,7 +96,7 @@ services:
       TOKEN: $TOKEN
     volumes:
       - /:/host:ro,rslave
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+$SOCK_VOLUME
     logging:
       driver: json-file
       options: { max-size: "5m", max-file: "2" }
@@ -105,7 +115,7 @@ else
   docker run -d --name "$NAME" --restart unless-stopped --network host --pid host \\
     --cap-add NET_RAW --security-opt no-new-privileges:true \\
     -e HUB_URL="$HUB_URL" -e TOKEN="$TOKEN" \\
-    -v /:/host:ro,rslave -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+    -v /:/host:ro,rslave "\${SOCK_ARG[@]}" \\
     --log-opt max-size=5m --log-opt max-file=2 "$IMAGE" >/dev/null
 fi
 
@@ -114,6 +124,7 @@ for _ in $(seq 1 30); do
   LOGS="$(docker logs "$NAME" 2>&1 || true)"
   if grep -q "connected to hub" <<<"$LOGS"; then
     ok "Агент подключился к $HUB_URL — сервер уже в панели"
+    [ "$CONTAINERS" -eq 1 ] || echo "  доступ к Docker-контейнерам выключен"
     echo "  обновить: повторите эту же команду;  удалить: ... | sudo bash -s -- --uninstall"
     exit 0
   fi

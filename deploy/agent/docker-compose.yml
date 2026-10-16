@@ -2,7 +2,7 @@
 # ("Добавить сервер"); this copy is a reference.
 services:
   besigor-agent:
-    image: ghcr.io/igorp0tatoes/besigor-agent:${BESIGOR_VERSION:-latest}
+    image: ghcr.io/igorp0tatoes/besigor-agent:${BESIGOR_TAG:-latest}
     container_name: besigor-agent
     restart: unless-stopped
     network_mode: host # host network counters

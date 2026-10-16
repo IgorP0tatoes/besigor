@@ -19,6 +19,7 @@ interface ServerRow {
   host_info: string | null;
   last_seen: number | null;
   sort: number;
+  docker: number;
 }
 
 const newToken = () => 'bsg_' + randomBytes(24).toString('base64url');
@@ -30,7 +31,7 @@ function hubUrl(req: { headers: Record<string, unknown>; protocol: string }) {
   return `${proto}://${host}`;
 }
 
-export function agentCompose(url: string, token: string) {
+export function agentCompose(url: string, token: string, docker: boolean) {
   return `services:
   besigor-agent:
     image: ${config.agentImage}:${config.version}
@@ -44,8 +45,7 @@ export function agentCompose(url: string, token: string) {
       HUB_URL: ${url}
       TOKEN: ${token}
     volumes:
-      - /:/host:ro,rslave
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/host:ro,rslave${docker ? '\n      - /var/run/docker.sock:/var/run/docker.sock:ro' : ''}
     logging:
       driver: json-file
       options: { max-size: "5m", max-file: "2" }
@@ -87,6 +87,7 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
         host,
         live: st.live ?? null,
         outdated: isOutdated(host?.version, config.version),
+        docker: !!row.docker,
         traffic: (() => {
           const t = trafficSummary(db, row.id);
           return t ? { used: t.used, limit: t.limit } : null;
@@ -107,18 +108,23 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
       return view(row);
     });
 
-    api.post<{ Body: { name?: string } }>('/api/servers', async (req, reply) => {
+    const instructions = (req: { headers: Record<string, unknown>; protocol: string }, token: string, docker: boolean) => {
+      const url = hubUrl(req);
+      return { token, install: installCommand(url, token, docker), compose: agentCompose(url, token, docker), hubUrl: url, docker };
+    };
+
+    api.post<{ Body: { name?: string; docker?: boolean } }>('/api/servers', async (req, reply) => {
       const name = (req.body?.name ?? '').trim().slice(0, 64);
       if (!name) return reply.code(400).send({ error: 'Укажите имя сервера' });
+      const docker = req.body?.docker !== false;
       const id = randomUUID();
       const token = newToken();
       const sort = (db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM servers').get() as { s: number }).s;
-      db.prepare('INSERT INTO servers (id, name, token_hash, created_at, sort) VALUES (?, ?, ?, ?, ?)').run(
-        id, name, sha256(token), Math.floor(Date.now() / 1000), sort,
+      db.prepare('INSERT INTO servers (id, name, token_hash, created_at, sort, docker) VALUES (?, ?, ?, ?, ?, ?)').run(
+        id, name, sha256(token), Math.floor(Date.now() / 1000), sort, docker ? 1 : 0,
       );
       bus.publish({ type: 'servers' });
-      const url = hubUrl(req);
-      return { id, name, token, install: installCommand(url, token), compose: agentCompose(url, token), hubUrl: url };
+      return { id, name, ...instructions(req, token, docker) };
     });
 
     api.patch<{ Params: { id: string }; Body: { name?: string } }>('/api/servers/:id', async (req, reply) => {
@@ -130,13 +136,17 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
       return { ok: true };
     });
 
-    api.post<{ Params: { id: string } }>('/api/servers/:id/token', async (req, reply) => {
+    // A new token is also how the Docker access of a server changes: the agent
+    // has to be reinstalled with (or without) the socket mounted anyway.
+    api.post<{ Params: { id: string }; Body: { docker?: boolean } }>('/api/servers/:id/token', async (req, reply) => {
+      const row = db.prepare('SELECT docker FROM servers WHERE id = ?').get(req.params.id) as { docker: number } | undefined;
+      if (!row) return reply.code(404).send({ error: 'not found' });
+      const docker = typeof req.body?.docker === 'boolean' ? req.body.docker : !!row.docker;
       const token = newToken();
-      const res = db.prepare('UPDATE servers SET token_hash = ? WHERE id = ?').run(sha256(token), req.params.id);
-      if (!res.changes) return reply.code(404).send({ error: 'not found' });
+      db.prepare('UPDATE servers SET token_hash = ?, docker = ? WHERE id = ?').run(sha256(token), docker ? 1 : 0, req.params.id);
       agents.kick(req.params.id);
-      const url = hubUrl(req);
-      return { token, install: installCommand(url, token), compose: agentCompose(url, token), hubUrl: url };
+      bus.publish({ type: 'servers' });
+      return instructions(req, token, docker);
     });
 
     api.delete<{ Params: { id: string } }>('/api/servers/:id', async (req, reply) => {
@@ -174,6 +184,8 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
     api.get<{ Params: { id: string; name: string }; Querystring: { follow?: string; tail?: string } }>(
       '/api/servers/:id/containers/:name/logs',
       (req, reply) => {
+        const srv = db.prepare('SELECT docker FROM servers WHERE id = ?').get(req.params.id) as { docker: number } | undefined;
+        if (!srv?.docker) return reply.code(403).send({ error: 'Доступ к Docker для этого сервера выключен' });
         const tail = Math.min(1000, Math.max(10, Number(req.query.tail) || 200));
         const write = (event: string, data: unknown) => reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         reply.raw.writeHead(200, {

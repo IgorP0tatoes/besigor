@@ -2,7 +2,7 @@
 # The hub speaks plain HTTP on 127.0.0.1:8090; the proxy terminates TLS.
 services:
   besigor:
-    image: ghcr.io/igorp0tatoes/besigor-hub:${BESIGOR_VERSION:-latest}
+    image: ghcr.io/igorp0tatoes/besigor-hub:${BESIGOR_TAG:-latest}
     container_name: besigor
     restart: unless-stopped
     env_file: .env

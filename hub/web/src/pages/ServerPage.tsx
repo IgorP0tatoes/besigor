@@ -8,7 +8,7 @@ import { api } from '../lib/api';
 import { bitsParts, bytesParts, fmtAgo, fmtBits, fmtBytes, fmtNumber, fmtRate, fmtUptime, pct } from '../lib/format';
 import { useHub } from '../lib/hub';
 import type { RangeKey, Series, Server } from '../lib/types';
-import { InstallSteps, type TokenResult } from './AddServer';
+import { DockerChoice, InstallSteps, type TokenResult } from './AddServer';
 import { AlertsPanel } from './AlertsPanel';
 import { Containers } from './Containers';
 import { Probes } from './Probes';
@@ -192,6 +192,7 @@ function Manage({ server }: { server: Server }) {
   const [dialog, setDialog] = useState<'rename' | 'token' | 'delete' | null>(null);
   const [name, setName] = useState(server.name);
   const [token, setToken] = useState<TokenResult | null>(null);
+  const [docker, setDocker] = useState(server.docker);
   const [toast, show] = useToast();
 
   const close = () => {
@@ -201,12 +202,17 @@ function Manage({ server }: { server: Server }) {
 
   return (
     <>
-      <div className="danger-zone glass">
-        <p>Управление сервером. Новый токен сразу отключит текущего агента — его нужно будет перезапустить с новым токеном.</p>
+      <div className="server-actions">
         <button className="btn btn-sm" onClick={() => setDialog('rename')}>
           Переименовать
         </button>
-        <button className="btn btn-sm" onClick={() => setDialog('token')}>
+        <button
+          className="btn btn-sm"
+          onClick={() => {
+            setDocker(server.docker);
+            setDialog('token');
+          }}
+        >
           Новый токен
         </button>
         <button className="btn btn-sm btn-danger" onClick={() => setDialog('delete')}>
@@ -246,12 +252,13 @@ function Manage({ server }: { server: Server }) {
           <h2>Новый токен</h2>
           {!token ? (
             <>
-              <p>Старый токен перестанет работать, агент «{server.name}» отключится до перезапуска с новым токеном.</p>
+              <p>Старый токен перестанет работать, агент «{server.name}» отключится до перезапуска с новым токеном. Здесь же можно включить или выключить доступ к Docker.</p>
+              <DockerChoice value={docker} onChange={setDocker} />
               <div className="dialog-actions">
                 <button className="btn btn-ghost" onClick={close}>
                   Отмена
                 </button>
-                <button className="btn btn-primary" onClick={async () => setToken(await api<TokenResult>(`/api/servers/${server.id}/token`, { method: 'POST' }))}>
+                <button className="btn btn-primary" onClick={async () => setToken(await api<TokenResult>(`/api/servers/${server.id}/token`, { method: 'POST', json: { docker } }))}>
                   Выпустить
                 </button>
               </div>
@@ -328,12 +335,15 @@ export function ServerPage() {
         ← Все серверы
       </Link>
       <div className="page-head">
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <div className="eyebrow">02 · Сервер</div>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <StatusDot online={server.online} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{server.name}</span>
-          </h1>
+          <div className="server-title-row">
+            <h1 style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+              <StatusDot online={server.online} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{server.name}</span>
+            </h1>
+            <Manage server={server} />
+          </div>
           <div className="chips">
             <span className={`tag ${server.online ? '' : 'bad'}`}>{server.online ? 'В сети' : `Не в сети · ${fmtAgo(server.lastSeen)}`}</span>
             {h && <span className="tag">{h.os}</span>}
@@ -346,6 +356,7 @@ export function ServerPage() {
             {h?.cpuModel && <span className="tag">{h.cpuModel}</span>}
             {server.ip && <span className="tag num">{server.ip}</span>}
             {h && <span className={`tag ${server.outdated ? 'warn' : ''}`}>агент {h.version}</span>}
+            {!server.docker && <span className="tag">без доступа к Docker</span>}
           </div>
         </div>
       </div>
@@ -397,11 +408,10 @@ export function ServerPage() {
       {series ? <Charts s={series} /> : <div className="charts" style={{ minHeight: 300 }} />}
 
       {server.live?.containers && server.live.containers.length > 0 && (
-        <Containers serverId={server.id} list={server.live.containers} online={server.online} />
+        <Containers serverId={server.id} list={server.live.containers} online={server.online} logs={server.docker} />
       )}
       <Probes serverId={server.id} range={range} />
       <AlertsPanel serverId={server.id} />
-      <Manage server={server} />
     </main>
   );
 }

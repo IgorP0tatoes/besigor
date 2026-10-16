@@ -82,6 +82,10 @@ const migrations: string[] = [
     SELECT server_id, date(ts, 'unixepoch'), SUM(json_extract(data, '$.rx')), SUM(json_extract(data, '$.tx'))
     FROM stats_1m GROUP BY server_id, date(ts, 'unixepoch');
   `,
+  `
+  -- 1: the agent may read docker.sock (containers, logs); 0: host metrics only
+  ALTER TABLE servers ADD COLUMN docker INTEGER NOT NULL DEFAULT 1;
+  `,
 ];
 
 export function openDb(path: string): DB {

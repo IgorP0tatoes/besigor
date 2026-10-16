@@ -1650,3 +1650,87 @@ select.input {
   word-break: break-all;
   padding-right: 120px;
 }
+
+/* ---------- server header actions & docker choice ---------- */
+
+.server-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+}
+
+.server-title-row h1 {
+  flex: 1 1 auto;
+}
+
+.server-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.choice {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.choice-card {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: border-color 0.3s var(--ease), background 0.3s var(--ease), box-shadow 0.3s var(--ease);
+}
+
+.choice-card b {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.choice-card span {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.choice-card:hover {
+  border-color: rgba(169, 156, 255, 0.35);
+}
+
+.choice-card.on {
+  border-color: rgba(169, 156, 255, 0.7);
+  background: rgba(89, 67, 255, 0.12);
+  box-shadow: 0 0 0 3px rgba(89, 67, 255, 0.15);
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    gap: 8px;
+    padding: 12px 14px;
+  }
+  .topbar-right {
+    gap: 6px;
+  }
+  .topbar-nav {
+    gap: 0;
+  }
+  .topbar-nav a {
+    padding: 6px 8px;
+  }
+  .summary-pill {
+    padding: 5px 9px;
+  }
+  .topbar-right .btn-sm {
+    padding: 0 8px;
+  }
+  .server-actions {
+    margin-left: 0;
+  }
+}

@@ -3,10 +3,26 @@ import { CodeBlock, Dialog, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 
 export interface TokenResult {
+  docker: boolean;
   token: string;
   install: string;
   compose: string;
   hubUrl: string;
+}
+
+export function DockerChoice({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="choice" role="radiogroup" aria-label="Доступ к Docker">
+      <button type="button" role="radio" aria-checked={value} className={`choice-card ${value ? 'on' : ''}`} onClick={() => onChange(true)}>
+        <b>С доступом к Docker</b>
+        <span>Список контейнеров, их CPU, память и сеть, логи по кнопке, алерты «контейнер упал». Агент получает docker.sock только на чтение.</span>
+      </button>
+      <button type="button" role="radio" aria-checked={!value} className={`choice-card ${!value ? 'on' : ''}`} onClick={() => onChange(false)}>
+        <b>Без Docker</b>
+        <span>Только метрики сервера: CPU, память, диски, сеть, проверки. К контейнерам агент доступа не получит.</span>
+      </button>
+    </div>
+  );
 }
 
 export function InstallSteps({ result }: { result: TokenResult }) {
@@ -44,6 +60,7 @@ export function InstallSteps({ result }: { result: TokenResult }) {
 
 export function AddServerDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('');
+  const [docker, setDocker] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TokenResult | null>(null);
@@ -53,7 +70,7 @@ export function AddServerDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError('');
     try {
-      setResult(await api<TokenResult>('/api/servers', { method: 'POST', json: { name } }));
+      setResult(await api<TokenResult>('/api/servers', { method: 'POST', json: { name, docker } }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось создать сервер');
     } finally {
@@ -70,6 +87,10 @@ export function AddServerDialog({ onClose }: { onClose: () => void }) {
           <div className="field">
             <label htmlFor="sname">Имя</label>
             <input id="sname" className="input" placeholder="Например, nl-1" value={name} onChange={(e) => setName(e.target.value)} autoFocus required maxLength={64} />
+          </div>
+          <div className="field" style={{ marginTop: 16 }}>
+            <label>Давать агенту доступ к Docker-контейнерам?</label>
+            <DockerChoice value={docker} onChange={setDocker} />
           </div>
           <div className="form-error" style={{ marginTop: 10 }}>
             {error}

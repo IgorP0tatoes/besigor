@@ -60,6 +60,7 @@ export interface Server {
   host: HostInfo | null;
   live: Sample | null;
   outdated: boolean;
+  docker: boolean;
   traffic: { used: number; limit: number | null } | null;
 }
 

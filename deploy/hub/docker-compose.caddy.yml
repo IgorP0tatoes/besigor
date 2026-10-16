@@ -3,7 +3,7 @@
 #   docker compose -f docker-compose.caddy.yml up -d
 services:
   besigor:
-    image: ghcr.io/igorp0tatoes/besigor-hub:${BESIGOR_VERSION:-latest}
+    image: ghcr.io/igorp0tatoes/besigor-hub:${BESIGOR_TAG:-latest}
     container_name: besigor
     restart: unless-stopped
     env_file: .env
