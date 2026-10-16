@@ -1,0 +1,18 @@
+# besigor hub behind your own reverse proxy (Caddy, nginx, Traefik…).
+# The hub speaks plain HTTP on 127.0.0.1:8090; the proxy terminates TLS.
+services:
+  besigor:
+    image: ghcr.io/igorp0tatoes/besigor-hub:${BESIGOR_VERSION:-latest}
+    container_name: besigor
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - besigor-data:/data
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  besigor-data:

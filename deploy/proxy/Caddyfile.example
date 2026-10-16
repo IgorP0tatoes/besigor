@@ -1,0 +1,8 @@
+# Caddy proxies WebSocket upgrades and server-sent events out of the box.
+monitor.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8090 {
+		# keep the agent stream and the panel's live updates unbuffered
+		flush_interval -1
+	}
+}

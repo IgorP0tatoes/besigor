@@ -1,0 +1,33 @@
+# besigor hub with a bundled Caddy that obtains a TLS certificate itself.
+# Point DNS for $DOMAIN at this server, keep ports 80 and 443 free, then:
+#   docker compose -f docker-compose.caddy.yml up -d
+services:
+  besigor:
+    image: ghcr.io/igorp0tatoes/besigor-hub:${BESIGOR_VERSION:-latest}
+    container_name: besigor
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - besigor-data:/data
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: besigor-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    command: caddy reverse-proxy --from ${DOMAIN} --to besigor:8090
+    volumes:
+      - caddy-data:/data
+    depends_on: [besigor]
+
+volumes:
+  besigor-data:
+  caddy-data:

@@ -1,0 +1,20 @@
+# besigor agent. The panel generates this file with HUB_URL and TOKEN filled in
+# ("Добавить сервер"); this copy is a reference.
+services:
+  besigor-agent:
+    image: ghcr.io/igorp0tatoes/besigor-agent:${BESIGOR_VERSION:-latest}
+    container_name: besigor-agent
+    restart: unless-stopped
+    network_mode: host # host network counters
+    pid: host # host /proc (mounts, processes)
+    cap_add: [NET_RAW] # ping checks
+    security_opt: [no-new-privileges:true]
+    environment:
+      HUB_URL: https://monitor.example.com
+      TOKEN: bsg_change_me
+    volumes:
+      - /:/host:ro,rslave
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
