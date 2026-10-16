@@ -27,7 +27,7 @@ function recipientInput(b: RecipientBody | undefined) {
   const thread = b?.threadId == null || String(b.threadId) === '' ? null : Number(b.threadId);
   if (thread !== null && !Number.isInteger(thread)) return null;
   return {
-    name: (b?.name ?? '').trim() || chatId,
+    name: (b?.name ?? '').trim(),
     chatId,
     threadId: thread,
     categories: (b?.categories ?? []).filter((c): c is Category => c in CATEGORIES),
@@ -91,16 +91,17 @@ export function registerAlertApi(app: FastifyInstance, db: DB, engine: AlertEngi
       return { configured: bot.configured, username: bot.botUsername };
     });
 
+    // The label comes from Telegram (chat title) unless one is given.
     api.post<{ Body: RecipientBody }>('/api/telegram/recipients', async (req, reply) => {
       const r = recipientInput(req.body);
       if (!r) return reply.code(400).send({ error: 'Проверьте chat_id и номер треда' });
-      return { id: saveRecipient(db, r) };
+      return { id: saveRecipient(db, { ...r, name: r.name || (await bot.recipientName(r.chatId, r.threadId)) }) };
     });
 
     api.put<{ Params: { id: string }; Body: RecipientBody }>('/api/telegram/recipients/:id', async (req, reply) => {
       const r = recipientInput(req.body);
       if (!r) return reply.code(400).send({ error: 'Проверьте chat_id и номер треда' });
-      saveRecipient(db, { ...r, id: req.params.id });
+      saveRecipient(db, { ...r, id: req.params.id, name: r.name || (await bot.recipientName(r.chatId, r.threadId)) });
       return { ok: true };
     });
 

@@ -42,7 +42,6 @@ function CategoryPicker({ value, onChange, labels }: { value: Category[]; onChan
 }
 
 function RecipientForm({ initial, labels, onSaved, onCancel }: { initial?: Partial<Recipient>; labels: Record<Category, string>; onSaved: () => void; onCancel?: () => void }) {
-  const [name, setName] = useState(initial?.name ?? '');
   const [chatId, setChatId] = useState(initial?.chatId ?? '');
   const [threadId, setThreadId] = useState(initial?.threadId != null ? String(initial.threadId) : '');
   const [cats, setCats] = useState<Category[]>(initial?.categories ?? ALL);
@@ -51,7 +50,7 @@ function RecipientForm({ initial, labels, onSaved, onCancel }: { initial?: Parti
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
-    const body = { name, chatId, threadId: threadId.trim() === '' ? null : Number(threadId), categories: cats };
+    const body = { chatId, threadId: threadId.trim() === '' ? null : Number(threadId), categories: cats };
     try {
       if (initial?.id) await api(`/api/telegram/recipients/${initial.id}`, { method: 'PUT', json: body });
       else await api('/api/telegram/recipients', { method: 'POST', json: body });
@@ -65,12 +64,8 @@ function RecipientForm({ initial, labels, onSaved, onCancel }: { initial?: Parti
     <form className="recipient-form" onSubmit={submit}>
       <div className="form-grid">
         <div className="field">
-          <label>Название</label>
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Админы / Аварии" />
-        </div>
-        <div className="field">
           <label>chat_id</label>
-          <input className="input num" value={chatId} onChange={(e) => setChatId(e.target.value)} placeholder="-1001234567890" required />
+          <input className="input num" value={chatId} onChange={(e) => setChatId(e.target.value)} placeholder="ID чата" required />
         </div>
         <div className="field">
           <label>Тред (необязательно)</label>
@@ -159,7 +154,7 @@ export function Settings() {
           <h2>Получатели</h2>
         </div>
         <p className="muted">
-          Личный чат, группа или отдельная тема в группе. Чтобы узнать chat_id и номер треда, напишите боту <code>/start</code> в нужном чате или теме — он появится ниже в «Новых чатах».
+          Личный чат, группа или отдельная тема в группе. Напишите боту <code>/start</code> в нужном чате или теме — он появится ниже в «Новых чатах», останется нажать «Добавить». Название подтянется из Telegram.
         </p>
 
         {fresh.length > 0 && (
@@ -174,7 +169,7 @@ export function Settings() {
                   {s.chatId}
                   {s.threadId ? ` · тред ${s.threadId}` : ''}
                 </span>
-                <button className="btn btn-sm" onClick={() => setPrefill({ name: s.title, chatId: s.chatId, threadId: s.threadId })}>
+                <button className="btn btn-sm" onClick={() => setPrefill({ chatId: s.chatId, threadId: s.threadId })}>
                   Добавить
                 </button>
               </div>

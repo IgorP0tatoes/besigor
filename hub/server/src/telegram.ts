@@ -109,6 +109,7 @@ export class TelegramBot implements Notifier {
         ],
       });
       this.log.info({ bot: this.username }, 'telegram bot started');
+      void this.nameRecipients();
     } catch (err) {
       this.log.error({ err: (err as Error).message }, 'telegram bot token rejected');
       this.token = '';
@@ -120,6 +121,32 @@ export class TelegramBot implements Notifier {
   stop() {
     this.abort?.abort();
     this.abort = undefined;
+  }
+
+  /** Human name of a chat: group title or the user's name; null if unknown. */
+  async chatTitle(chatId: string): Promise<string | null> {
+    if (!this.token) return null;
+    try {
+      const c = await this.call<{ title?: string; first_name?: string; last_name?: string; username?: string }>('getChat', { chat_id: chatId });
+      return c.title ?? ([c.first_name, c.last_name].filter(Boolean).join(' ') || (c.username ? `@${c.username}` : null));
+    } catch {
+      return this.seen.find((s) => s.chatId === chatId)?.title ?? null;
+    }
+  }
+
+  /** Recipient label: chat name plus the topic number, if any. */
+  async recipientName(chatId: string, threadId: number | null) {
+    const title = (await this.chatTitle(chatId)) ?? chatId;
+    return threadId != null ? `${title} · тред ${threadId}` : title;
+  }
+
+  /** Recipients saved before names were looked up get one now. */
+  private async nameRecipients() {
+    for (const r of listRecipients(this.db)) {
+      if (r.name !== r.chatId) continue;
+      const name = await this.recipientName(r.chatId, r.threadId);
+      if (name !== r.chatId) saveRecipient(this.db, { ...r, name });
+    }
   }
 
   async setToken(token: string) {
