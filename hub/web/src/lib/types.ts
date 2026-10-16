@@ -60,6 +60,7 @@ export interface Server {
   host: HostInfo | null;
   live: Sample | null;
   outdated: boolean;
+  traffic: { used: number; limit: number | null } | null;
 }
 
 export type RangeKey = '1h' | '12h' | '24h' | '1w' | '30d' | '1y';

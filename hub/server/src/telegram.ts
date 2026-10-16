@@ -4,6 +4,7 @@ import type { AgentHub } from './agents.js';
 import { ALERT_DEFS, CATEGORIES, mutedUntil, setMute, worstDiskPct, type AlertEngine, type Category, type Notifier } from './alerts.js';
 import { getSetting, setSetting, type DB } from './db.js';
 import { esc, fmtBits, fmtBytes, fmtDuration, fmtNum } from './text.js';
+import { summary as trafficSummary } from './traffic.js';
 import type { HostInfo } from './types.js';
 
 export interface Recipient {
@@ -357,6 +358,10 @@ export class TelegramBot implements Notifier {
       lines.push(`Последний раз в сети ${fmtDuration(Math.floor(Date.now() / 1000) - s.last_seen)} назад`);
     } else {
       lines.push('Агент ещё не подключался.');
+    }
+    const t = trafficSummary(this.db, id);
+    if (t && t.used > 0) {
+      lines.push(`Трафик за месяц: <b>${fmtBytes(t.used)}</b>${t.limit ? ` из ${fmtBytes(t.limit)} (${fmtNum((t.used / t.limit) * 100, 0)}%)` : ''}`);
     }
     const firing = (this.alerts?.active() ?? []).filter((a) => a.serverId === id);
     if (firing.length) lines.push('', '⚠️ ' + firing.map((a) => ALERT_DEFS[a.type].label + (a.key ? ` (${esc(a.key)})` : '')).join(', '));

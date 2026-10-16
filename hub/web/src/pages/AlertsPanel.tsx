@@ -6,7 +6,8 @@ import { fmtNumber } from '../lib/format';
 export type AlertType =
   | 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net'
   | 'container_down' | 'container_restarts'
-  | 'probe_down' | 'probe_latency' | 'probe_loss' | 'cert_expiry';
+  | 'probe_down' | 'probe_latency' | 'probe_loss' | 'cert_expiry'
+  | 'traffic_quota';
 
 interface AlertDef {
   label: string;
@@ -39,6 +40,7 @@ const HINTS: Record<AlertType, string> = {
   probe_latency: 'Среднее время ответа',
   probe_loss: 'Доля потерянных проверок',
   cert_expiry: 'Осталось дней до истечения',
+  traffic_quota: '80 % и 95 % лимита из карточки трафика',
 };
 
 let defsCache: Record<AlertType, AlertDef> | null = null;

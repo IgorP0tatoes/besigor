@@ -1,9 +1,10 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { AgentHub } from './agents.js';
 import type { DB } from './db.js';
-import { fmtNum, fmtDuration, esc } from './text.js';
+import { fmtBytes, fmtNum, fmtDuration, esc } from './text.js';
 import { bus } from './live.js';
 import type { ProbeStore } from './probes.js';
+import { summary as trafficSummary } from './traffic.js';
 import type { Container, HostInfo, Sample } from './types.js';
 
 export type Category = 'offline' | 'resources' | 'traffic' | 'containers' | 'probes';
@@ -18,7 +19,8 @@ export const CATEGORIES: Record<Category, string> = {
 export type AlertType =
   | 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net'
   | 'container_down' | 'container_restarts'
-  | 'probe_down' | 'probe_latency' | 'probe_loss' | 'cert_expiry';
+  | 'probe_down' | 'probe_latency' | 'probe_loss' | 'cert_expiry'
+  | 'traffic_quota';
 
 interface AlertDef {
   label: string;
@@ -47,6 +49,7 @@ export const ALERT_DEFS: Record<AlertType, AlertDef> = {
   probe_down: { label: 'Цель проверки недоступна', category: 'probes', unit: 'подряд', hasValue: true, hasMinutes: false, min: 1, max: 10, step: 1, maxMinutes: 1, defaults: { enabled: true, value: 3, minutes: 1 } },
   cert_expiry: { label: 'Сертификат истекает', category: 'probes', unit: 'дн', hasValue: true, hasMinutes: false, min: 1, max: 60, step: 1, maxMinutes: 1, defaults: { enabled: true, value: 14, minutes: 1 } },
   probe_latency: { label: 'Время ответа', category: 'probes', unit: 'мс', hasValue: true, min: 10, max: 5000, step: 10, maxMinutes: 60, defaults: { enabled: false, value: 500, minutes: 5 } },
+  traffic_quota: { label: 'Месячный лимит трафика', category: 'traffic', unit: '', hasValue: false, hasMinutes: false, min: 0, max: 0, step: 0, maxMinutes: 1, defaults: { enabled: true, value: 0, minutes: 1 } },
   probe_loss: { label: 'Потери пакетов', category: 'probes', unit: '%', hasValue: true, min: 1, max: 100, step: 1, maxMinutes: 60, defaults: { enabled: false, value: 20, minutes: 5 } },
 };
 
@@ -311,6 +314,27 @@ export class AlertEngine {
     }
   }
 
+  /** 80 % and 95 % of the monthly allowance; the state clears when a new period starts. */
+  private checkTraffic(serverId: string, name: string, cfg: AlertConfig, now: number) {
+    const t = trafficSummary(this.db, serverId, new Date(now * 1000));
+    if (!t) return;
+    for (const level of [80, 95]) {
+      const key = String(level);
+      const firing = this.state(serverId, 'traffic_quota', key);
+      const pct = t.limit ? (t.used / t.limit) * 100 : 0;
+      if (firing && (pct < level || !cfg.enabled)) {
+        this.resolve(serverId, 'traffic_quota', key); // new period, raised limit or disabled
+      } else if (!firing && cfg.enabled && t.limit && pct >= level) {
+        this.fire(serverId, 'traffic_quota', now, pct, key);
+        this.send(
+          serverId,
+          'traffic',
+          `📶 ${name}: израсходовано ${fmtNum(pct, 0)}% месячного трафика · ${fmtBytes(t.used)} из ${fmtBytes(t.limit)}\nпериод до ${t.periodEnd.split('-').reverse().join('.')}`,
+        );
+      }
+    }
+  }
+
   private checkProbes(serverId: string, name: string, cfg: AlertConfig[], now: number) {
     if (!this.probes) return;
     const conf = (t: AlertType) => cfg.find((c) => c.type === t)!;
@@ -384,13 +408,14 @@ export class AlertEngine {
       this.send(srv.id, 'offline', `✅ ${name} снова в сети · простой ${fmtDuration(now - down.since)}`);
     }
 
+    this.checkTraffic(srv.id, name, cfg.find((c) => c.type === 'traffic_quota')!, now);
     if (!online) return; // metric alerts pause while the agent is away
     const hist = this.history.get(srv.id) ?? [];
     const cores = srv.host_info ? (JSON.parse(srv.host_info) as HostInfo).cores : 1;
     this.checkContainers(srv.id, name, hist.at(-1)?.containers, cfg, now);
     this.checkProbes(srv.id, name, cfg, now);
     for (const c of cfg) {
-      if (c.type === 'status' || c.type.startsWith('container') || c.type.startsWith('probe') || c.type === 'cert_expiry' || !c.enabled) continue;
+      if (c.type === 'status' || c.type.startsWith('container') || c.type.startsWith('probe') || c.type === 'cert_expiry' || c.type === 'traffic_quota' || !c.enabled) continue;
       const def = ALERT_DEFS[c.type];
       const from = now - c.minutes * 60;
       const window = hist.filter((s) => s.ts >= from);

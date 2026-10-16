@@ -61,11 +61,18 @@ function round(v: number, digits: number) {
 /** Stores minute records; returns the newest timestamp seen (for the ack). */
 export function insertMinutes(db: DB, serverId: string, records: Sample[]): number {
   const stmt = db.prepare('INSERT OR IGNORE INTO stats_1m (server_id, ts, data) VALUES (?, ?, ?)');
+  const traffic = db.prepare(
+    `INSERT INTO traffic_daily (server_id, day, rx, tx) VALUES (?, ?, ?, ?)
+     ON CONFLICT(server_id, day) DO UPDATE SET rx = rx + excluded.rx, tx = tx + excluded.tx`,
+  );
   let upTo = 0;
   db.transaction(() => {
     for (const r of records) {
       if (!Number.isInteger(r.ts) || r.ts % 60 !== 0) continue;
-      stmt.run(serverId, r.ts, JSON.stringify(r));
+      // count traffic only once, even when the agent replays a record
+      if (stmt.run(serverId, r.ts, JSON.stringify(r)).changes) {
+        traffic.run(serverId, new Date(r.ts * 1000).toISOString().slice(0, 10), Math.round(r.rx || 0), Math.round(r.tx || 0));
+      }
       upTo = Math.max(upTo, r.ts);
     }
   })();

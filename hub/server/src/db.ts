@@ -66,6 +66,22 @@ const migrations: string[] = [
   CREATE TABLE probe_1m (probe_id TEXT NOT NULL, ts INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (probe_id, ts)) WITHOUT ROWID;
   CREATE TABLE probe_1h (probe_id TEXT NOT NULL, ts INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (probe_id, ts)) WITHOUT ROWID;
   `,
+  `
+  CREATE TABLE traffic_daily (
+    server_id TEXT NOT NULL,
+    day       TEXT NOT NULL,
+    rx        INTEGER NOT NULL DEFAULT 0,
+    tx        INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (server_id, day)
+  ) WITHOUT ROWID;
+  ALTER TABLE servers ADD COLUMN traffic_limit INTEGER;
+  ALTER TABLE servers ADD COLUMN traffic_reset_day INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE servers ADD COLUMN traffic_mode TEXT NOT NULL DEFAULT 'sum';
+  -- history collected before this table existed
+  INSERT INTO traffic_daily (server_id, day, rx, tx)
+    SELECT server_id, date(ts, 'unixepoch'), SUM(json_extract(data, '$.rx')), SUM(json_extract(data, '$.tx'))
+    FROM stats_1m GROUP BY server_id, date(ts, 'unixepoch');
+  `,
 ];
 
 export function openDb(path: string): DB {

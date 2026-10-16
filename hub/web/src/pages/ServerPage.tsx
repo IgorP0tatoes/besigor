@@ -12,6 +12,7 @@ import { InstallSteps, type TokenResult } from './AddServer';
 import { AlertsPanel } from './AlertsPanel';
 import { Containers } from './Containers';
 import { Probes } from './Probes';
+import { TrafficCard } from './Traffic';
 import { worstDisk } from './Dashboard';
 
 const RANGES: { key: RangeKey; label: string }[] = [
@@ -378,6 +379,8 @@ export function ServerPage() {
           </Stat>
         )}
       </div>
+
+      <TrafficCard serverId={server.id} />
 
       <div className="toolbar">
         <div className="eyebrow" style={{ margin: 0 }}>

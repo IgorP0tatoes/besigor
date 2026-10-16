@@ -14,6 +14,7 @@ import { openDb } from './db.js';
 import { ProbeStore } from './probes.js';
 import { prune, rollup } from './stats.js';
 import { TelegramBot } from './telegram.js';
+import { pruneTraffic } from './traffic.js';
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? 'info' },
@@ -67,6 +68,7 @@ const jobs = [
   setInterval(() => {
     prune(db);
     probes.prune();
+    pruneTraffic(db);
   }, 3600_000),
 ];
 startBackups(db, config.dataDir, app.log);

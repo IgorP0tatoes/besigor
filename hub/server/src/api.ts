@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AgentHub } from './agents.js';
 import type { AlertEngine } from './alerts.js';
 import type { ProbeStore } from './probes.js';
+import { setSettings as setTraffic, summary as trafficSummary, TRAFFIC_MODES, type TrafficMode } from './traffic.js';
 import { requireSession, sha256 } from './auth.js';
 import { config } from './config.js';
 import type { DB } from './db.js';
@@ -79,6 +80,10 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
         host,
         live: st.live ?? null,
         outdated: isOutdated(host?.version, config.version),
+        traffic: (() => {
+          const t = trafficSummary(db, row.id);
+          return t ? { used: t.used, limit: t.limit } : null;
+        })(),
       };
     };
 
@@ -130,7 +135,7 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
     api.delete<{ Params: { id: string } }>('/api/servers/:id', async (req, reply) => {
       const id = req.params.id;
       const res = db.transaction(() => {
-        for (const t of ['stats_1m', 'stats_15m', 'stats_1h']) db.prepare(`DELETE FROM ${t} WHERE server_id = ?`).run(id);
+        for (const t of ['stats_1m', 'stats_15m', 'stats_1h', 'traffic_daily']) db.prepare(`DELETE FROM ${t} WHERE server_id = ?`).run(id);
         return db.prepare('DELETE FROM servers WHERE id = ?').run(id);
       })();
       if (!res.changes) return reply.code(404).send({ error: 'not found' });
@@ -139,6 +144,17 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
       probes.removeServer(id);
       bus.publish({ type: 'servers' });
       return { ok: true };
+    });
+
+    api.get<{ Params: { id: string } }>('/api/servers/:id/traffic', async (req, reply) => {
+      const t = trafficSummary(db, req.params.id);
+      if (!t) return reply.code(404).send({ error: 'not found' });
+      return { ...t, modes: TRAFFIC_MODES };
+    });
+
+    api.put<{ Params: { id: string }; Body: { limit?: number | null; resetDay?: number; mode?: TrafficMode } }>('/api/servers/:id/traffic', async (req, reply) => {
+      if (!setTraffic(db, req.params.id, req.body ?? {})) return reply.code(404).send({ error: 'not found' });
+      return trafficSummary(db, req.params.id);
     });
 
     api.get<{ Params: { id: string }; Querystring: { range?: string } }>('/api/servers/:id/stats', async (req, reply) => {

@@ -49,6 +49,7 @@ function ServerCard({ s, i, history }: { s: Server; i: number; history: Sample[]
         <Meter label="CPU" value={live ? l.cpu : 0} />
         <Meter label="RAM" value={live ? pct(l.memUsed, l.memTotal) : 0} />
         <Meter label="Диск" value={live ? worstDisk(l) : 0} />
+        {s.traffic?.limit ? <Meter label="Трафик" value={pct(s.traffic.used, s.traffic.limit)} /> : null}
       </div>
       <div className="card-foot">
         {live ? (

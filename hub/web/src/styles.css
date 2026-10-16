@@ -1546,3 +1546,79 @@ input[type='range']:disabled {
   font-size: 12px;
   margin: 2px 0 8px;
 }
+
+/* ---------- traffic ---------- */
+
+.traffic {
+  padding: 20px;
+  margin-bottom: 4px;
+}
+
+.traffic .chart-head .btn {
+  margin-left: 12px;
+}
+
+.traffic-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 28px;
+  align-items: end;
+}
+
+.traffic-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 12px;
+  font-size: 12.5px;
+}
+
+.traffic-days {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 90px;
+}
+
+.traffic-day {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  border-radius: 3px;
+  background: rgba(244, 235, 255, 0.035);
+}
+
+.traffic-day i {
+  flex: 1;
+  display: block;
+  min-height: 0;
+  border-radius: 3px 3px 0 0;
+  transition: height 0.9s var(--ease);
+}
+
+.traffic-day .rx {
+  background: linear-gradient(180deg, #3dd6c4, rgba(61, 214, 196, 0.5));
+}
+
+.traffic-day .tx {
+  background: linear-gradient(180deg, #8b7bff, rgba(139, 123, 255, 0.5));
+}
+
+select.input {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) 50%,
+    calc(100% - 15px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 36px;
+}
+
+@media (max-width: 720px) {
+  .traffic-body {
+    grid-template-columns: 1fr;
+  }
+}
