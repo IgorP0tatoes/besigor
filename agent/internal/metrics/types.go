@@ -1,5 +1,7 @@
 package metrics
 
+import "github.com/IgorP0tatoes/besigor/agent/internal/docker"
+
 // HostInfo describes the machine once per connection.
 type HostInfo struct {
 	Version  string `json:"version"`
@@ -49,4 +51,6 @@ type Sample struct {
 	Rx           uint64     `json:"rx"`
 	Tx           uint64     `json:"tx"`
 	Uptime       uint64     `json:"uptime"`
+	// Containers is nil when Docker is not available on the host.
+	Containers []docker.Container `json:"containers,omitempty"`
 }

@@ -145,6 +145,37 @@ export function registerApi(app: FastifyInstance, db: DB, agents: AgentHub, aler
       return querySeries(db, req.params.id, range);
     });
 
+    // Container log over SSE: last lines, then (with follow) new ones live.
+    api.get<{ Params: { id: string; name: string }; Querystring: { follow?: string; tail?: string } }>(
+      '/api/servers/:id/containers/:name/logs',
+      (req, reply) => {
+        const tail = Math.min(1000, Math.max(10, Number(req.query.tail) || 200));
+        const write = (event: string, data: unknown) => reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        reply.raw.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        reply.hijack();
+        let done = false;
+        const finish = (error?: string) => {
+          if (done) return;
+          done = true;
+          write('end', { error: error ?? null });
+          reply.raw.end();
+        };
+        const stop = agents.requestLogs(req.params.id, req.params.name, tail, req.query.follow === '1', (lines) => write('lines', lines), finish);
+        if (!stop) return finish('сервер не в сети');
+        const ping = setInterval(() => reply.raw.write(': ping\n\n'), 25_000);
+        req.raw.on('close', () => {
+          clearInterval(ping);
+          done = true;
+          stop();
+        });
+      },
+    );
+
     // Server-sent events: live samples and status changes for the panel.
     api.get('/api/events', (req, reply) => {
       reply.raw.writeHead(200, {

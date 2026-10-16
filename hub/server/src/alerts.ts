@@ -3,7 +3,7 @@ import type { AgentHub } from './agents.js';
 import type { DB } from './db.js';
 import { fmtNum, fmtDuration, esc } from './text.js';
 import { bus } from './live.js';
-import type { HostInfo, Sample } from './types.js';
+import type { Container, HostInfo, Sample } from './types.js';
 
 export type Category = 'offline' | 'resources' | 'traffic' | 'containers' | 'probes';
 export const CATEGORIES: Record<Category, string> = {
@@ -14,7 +14,7 @@ export const CATEGORIES: Record<Category, string> = {
   probes: 'Сетевые проверки',
 };
 
-export type AlertType = 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net';
+export type AlertType = 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net' | 'container_down' | 'container_restarts';
 
 interface AlertDef {
   label: string;
@@ -36,6 +36,8 @@ export const ALERT_DEFS: Record<AlertType, AlertDef> = {
   cpu: { label: 'Процессор', category: 'resources', unit: '%', hasValue: true, min: 1, max: 99, step: 1, maxMinutes: 60, defaults: { enabled: false, value: 90, minutes: 10 } },
   load: { label: 'Load average', category: 'resources', unit: '× ядер', hasValue: true, min: 0.5, max: 10, step: 0.1, maxMinutes: 60, defaults: { enabled: false, value: 2, minutes: 10 } },
   net: { label: 'Сетевой трафик', category: 'traffic', unit: 'Мбит/с', hasValue: true, min: 1, max: 10000, step: 1, maxMinutes: 60, defaults: { enabled: false, value: 100, minutes: 10 } },
+  container_down: { label: 'Контейнер остановился', category: 'containers', unit: '', hasValue: false, min: 0, max: 0, step: 0, maxMinutes: 30, defaults: { enabled: true, value: 0, minutes: 1 } },
+  container_restarts: { label: 'Рестарты контейнера', category: 'containers', unit: 'раз', hasValue: true, min: 1, max: 20, step: 1, maxMinutes: 60, defaults: { enabled: true, value: 3, minutes: 10 } },
 };
 
 export const ALERT_TYPES = Object.keys(ALERT_DEFS) as AlertType[];
@@ -133,6 +135,11 @@ const HISTORY_SECONDS = 3600;
 /** Evaluates thresholds over the live stream and reports state changes. */
 export class AlertEngine {
   private history = new Map<string, Sample[]>();
+  /** containers seen running this session, per server — only they can "go down" */
+  private seenRunning = new Map<string, Set<string>>();
+  private downSince = new Map<string, number>();
+  /** restart counters over time, per server|container */
+  private restarts = new Map<string, { ts: number; id: string; count: number }[]>();
   private timer?: NodeJS.Timeout;
   private off?: () => void;
 
@@ -151,6 +158,7 @@ export class AlertEngine {
         const cutoff = e.sample.ts - HISTORY_SECONDS;
         while (list.length && list[0]!.ts < cutoff) list.shift();
         this.history.set(e.serverId, list);
+        this.trackContainers(e.serverId, e.sample);
       } else if (e.type === 'status' && !e.online) {
         // stale samples must not trigger anything after a reconnect
         this.history.delete(e.serverId);
@@ -166,19 +174,21 @@ export class AlertEngine {
 
   forget(serverId: string) {
     this.history.delete(serverId);
+    this.seenRunning.delete(serverId);
     this.db.prepare('DELETE FROM alert_state WHERE server_id = ?').run(serverId);
     this.db.prepare('DELETE FROM alerts WHERE server_id = ?').run(serverId);
     this.db.prepare('DELETE FROM mutes WHERE server_id = ?').run(serverId);
   }
 
   /** Alerts currently firing, for the panel and the bot. */
-  active(): { serverId: string; type: AlertType; since: number; value: number | null }[] {
-    return (this.db.prepare('SELECT server_id, type, since, value FROM alert_state ORDER BY since').all() as {
+  active(): { serverId: string; type: AlertType; key: string; since: number; value: number | null }[] {
+    return (this.db.prepare('SELECT server_id, type, key, since, value FROM alert_state ORDER BY since').all() as {
       server_id: string;
       type: AlertType;
+      key: string;
       since: number;
       value: number | null;
-    }[]).map((r) => ({ serverId: r.server_id, type: r.type, since: r.since, value: r.value }));
+    }[]).map((r) => ({ serverId: r.server_id, type: r.type, key: r.key, since: r.since, value: r.value }));
   }
 
   tick(now = Math.floor(Date.now() / 1000)) {
@@ -197,23 +207,93 @@ export class AlertEngine {
     }
   }
 
-  private state(serverId: string, type: AlertType) {
-    return this.db.prepare("SELECT since, value FROM alert_state WHERE server_id = ? AND type = ? AND key = ''").get(serverId, type) as
+  private state(serverId: string, type: AlertType, key = '') {
+    return this.db.prepare('SELECT since, value FROM alert_state WHERE server_id = ? AND type = ? AND key = ?').get(serverId, type, key) as
       | { since: number; value: number | null }
       | undefined;
   }
 
-  private fire(serverId: string, type: AlertType, since: number, value: number | null) {
-    this.db.prepare("INSERT OR REPLACE INTO alert_state (server_id, type, key, since, value) VALUES (?, ?, '', ?, ?)").run(serverId, type, since, value);
+  private firingKeys(serverId: string, type: AlertType) {
+    return (this.db.prepare('SELECT key FROM alert_state WHERE server_id = ? AND type = ?').all(serverId, type) as { key: string }[]).map((r) => r.key);
   }
 
-  private resolve(serverId: string, type: AlertType) {
-    this.db.prepare("DELETE FROM alert_state WHERE server_id = ? AND type = ? AND key = ''").run(serverId, type);
+  private fire(serverId: string, type: AlertType, since: number, value: number | null, key = '') {
+    this.db.prepare('INSERT OR REPLACE INTO alert_state (server_id, type, key, since, value) VALUES (?, ?, ?, ?, ?)').run(serverId, type, key, since, value);
+  }
+
+  private resolve(serverId: string, type: AlertType, key = '') {
+    this.db.prepare('DELETE FROM alert_state WHERE server_id = ? AND type = ? AND key = ?').run(serverId, type, key);
   }
 
   private send(serverId: string, category: Category, html: string) {
     if (mutedUntil(this.db, serverId) !== undefined) return;
     this.notifier.notify(category, html);
+  }
+
+  private trackContainers(serverId: string, s: Sample) {
+    if (!s.containers) return;
+    const running = this.seenRunning.get(serverId) ?? new Set<string>();
+    this.seenRunning.set(serverId, running);
+    for (const c of s.containers) {
+      const k = `${serverId}|${c.name}`;
+      if (c.state === 'running') {
+        running.add(c.name);
+        this.downSince.delete(k);
+      } else if (running.has(c.name) && (c.state === 'exited' || c.state === 'dead') && !this.downSince.has(k)) {
+        this.downSince.set(k, s.ts);
+      }
+      const hist = this.restarts.get(k) ?? [];
+      // a recreated container (new id) starts counting from scratch
+      if (hist.length && hist.at(-1)!.id !== c.id) hist.length = 0;
+      hist.push({ ts: s.ts, id: c.id, count: c.restarts });
+      while (hist.length && hist[0]!.ts < s.ts - HISTORY_SECONDS) hist.shift();
+      this.restarts.set(k, hist);
+    }
+  }
+
+  private checkContainers(serverId: string, name: string, list: Container[] | undefined, cfg: AlertConfig[], now: number) {
+    if (!list) return;
+    const byName = new Map(list.map((c) => [c.name, c]));
+    const down = cfg.find((c) => c.type === 'container_down')!;
+    const loop = cfg.find((c) => c.type === 'container_restarts')!;
+
+    // stopped containers
+    for (const key of this.firingKeys(serverId, 'container_down')) {
+      const c = byName.get(key);
+      if (!c) {
+        this.resolve(serverId, 'container_down', key); // removed on purpose
+        this.seenRunning.get(serverId)?.delete(key);
+      } else if (c.state === 'running') {
+        this.resolve(serverId, 'container_down', key);
+        this.send(serverId, 'containers', `✅ ${name}: контейнер <b>${esc(key)}</b> снова работает`);
+      }
+    }
+    if (down.enabled) {
+      for (const c of list) {
+        const since = this.downSince.get(`${serverId}|${c.name}`);
+        if (since === undefined || now - since < down.minutes * 60 || this.state(serverId, 'container_down', c.name)) continue;
+        this.fire(serverId, 'container_down', since, c.exitCode, c.name);
+        this.send(serverId, 'containers', `🐳 ${name}: контейнер <b>${esc(c.name)}</b> остановился · код выхода ${c.exitCode}`);
+      }
+    }
+
+    // restart loops
+    for (const c of list) {
+      const hist = (this.restarts.get(`${serverId}|${c.name}`) ?? []).filter((h) => h.ts >= now - loop.minutes * 60);
+      const grown = hist.length ? hist.at(-1)!.count - Math.min(...hist.map((h) => h.count)) : 0;
+      const firing = this.state(serverId, 'container_restarts', c.name);
+      if (loop.enabled && !firing && grown >= loop.value) {
+        this.fire(serverId, 'container_restarts', now, grown, c.name);
+        this.send(serverId, 'containers', `🔁 ${name}: контейнер <b>${esc(c.name)}</b> перезапускается по кругу · ${grown} раз за ${loop.minutes}\u00a0мин`);
+      } else if (firing && grown === 0 && c.state === 'running') {
+        this.resolve(serverId, 'container_restarts', c.name);
+        this.send(serverId, 'containers', `✅ ${name}: контейнер <b>${esc(c.name)}</b> перестал перезапускаться`);
+      }
+    }
+    // a firing restart alert for a container that no longer exists
+    for (const key of this.firingKeys(serverId, 'container_restarts')) {
+      if (!byName.has(key)) this.resolve(serverId, 'container_restarts', key);
+    }
   }
 
   private checkServer(srv: { id: string; name: string; host_info: string | null; last_seen: number | null }, now: number) {
@@ -234,8 +314,9 @@ export class AlertEngine {
     if (!online) return; // metric alerts pause while the agent is away
     const hist = this.history.get(srv.id) ?? [];
     const cores = srv.host_info ? (JSON.parse(srv.host_info) as HostInfo).cores : 1;
+    this.checkContainers(srv.id, name, hist.at(-1)?.containers, cfg, now);
     for (const c of cfg) {
-      if (c.type === 'status' || !c.enabled) continue;
+      if (c.type === 'status' || c.type.startsWith('container') || !c.enabled) continue;
       const def = ALERT_DEFS[c.type];
       const from = now - c.minutes * 60;
       const window = hist.filter((s) => s.ts >= from);

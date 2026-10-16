@@ -3,7 +3,7 @@ import { useToast } from '../components/ui';
 import { api } from '../lib/api';
 import { fmtNumber } from '../lib/format';
 
-export type AlertType = 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net';
+export type AlertType = 'status' | 'cpu' | 'ram' | 'disk' | 'load' | 'net' | 'container_down' | 'container_restarts';
 
 interface AlertDef {
   label: string;
@@ -29,6 +29,8 @@ const HINTS: Record<AlertType, string> = {
   cpu: 'Средняя загрузка за период',
   load: 'Load average на одно ядро',
   net: 'Входящий + исходящий',
+  container_down: 'Был запущен и остановился',
+  container_restarts: 'Рестартов за период',
 };
 
 let defsCache: Record<AlertType, AlertDef> | null = null;
@@ -40,7 +42,9 @@ function fmtValue(def: AlertDef, v: number) {
 function AlertRow({ serverId, def, cfg, onChange, onApplyAll }: { serverId: string; def: AlertDef; cfg: AlertConfig; onChange: (c: AlertConfig) => void; onApplyAll: (c: AlertConfig) => void }) {
   const [local, setLocal] = useState(cfg);
   const timer = useRef(0);
-  useEffect(() => setLocal(cfg), [cfg]);
+  useEffect(() => {
+    setLocal(cfg);
+  }, [cfg]);
 
   // sliders save shortly after the thumb stops moving
   const update = (patch: Partial<AlertConfig>, delay = 400) => {

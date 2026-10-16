@@ -10,6 +10,22 @@ export interface HostInfo {
   bootTime: number;
 }
 
+export interface Container {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  health: string;
+  cpu: number;
+  mem: number;
+  memLimit: number;
+  rx: number;
+  tx: number;
+  restarts: number;
+  started: number;
+  exitCode: number;
+}
+
 export interface Sample {
   ts: number;
   cpu: number;
@@ -30,6 +46,7 @@ export interface Sample {
   rx: number;
   tx: number;
   uptime: number;
+  containers?: Container[];
 }
 
 export interface Server {
@@ -70,6 +87,7 @@ export interface Series {
   tx: number[];
   disks: { mount: string; total: number; used: (number | null)[] }[];
   net: { iface: string; rx: (number | null)[]; tx: (number | null)[] }[];
+  containers: { name: string; cpu: (number | null)[]; mem: (number | null)[] }[];
 }
 
 export type LiveEvent =

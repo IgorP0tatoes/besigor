@@ -10,6 +10,7 @@ import { useHub } from '../lib/hub';
 import type { RangeKey, Series, Server } from '../lib/types';
 import { InstallSteps, type TokenResult } from './AddServer';
 import { AlertsPanel } from './AlertsPanel';
+import { Containers } from './Containers';
 import { worstDisk } from './Dashboard';
 
 const RANGES: { key: RangeKey; label: string }[] = [
@@ -133,7 +134,10 @@ function Charts({ s }: { s: Series }) {
       { label: `${n.iface} ↓`, color: PALETTE[(i * 2) % PALETTE.length]!, values: n.rx },
       { label: `${n.iface} ↑`, color: PALETTE[(i * 2 + 1) % PALETTE.length]!, values: n.tx, dash: true },
     ]);
-    return { cpu, load, mem, swap, disks, io, net, ifaces };
+    const top = s.containers.slice(0, 6);
+    const ctCpu: ChartLine[] = top.map((c, i) => ({ label: c.name, color: PALETTE[i % PALETTE.length]!, values: c.cpu }));
+    const ctMem: ChartLine[] = top.map((c, i) => ({ label: c.name, color: PALETTE[i % PALETTE.length]!, values: c.mem }));
+    return { cpu, load, mem, swap, disks, io, net, ifaces, ctCpu, ctMem };
   }, [s]);
 
   const common = { ts: s.ts, step: s.step };
@@ -160,6 +164,16 @@ function Charts({ s }: { s: Series }) {
       {s.swapTotal > 0 && (
         <ChartCard title="Swap" hint={`из ${fmtBytes(s.swapTotal)}`} empty={empty}>
           <Chart {...common} lines={charts.swap} format={fmtPctAxis} yMax={100} />
+        </ChartCard>
+      )}
+      {s.containers.length > 0 && (
+        <ChartCard title="Контейнеры · CPU" hint="топ-6 по нагрузке" empty={empty}>
+          <Chart {...common} lines={charts.ctCpu} format={fmtPctVal} />
+        </ChartCard>
+      )}
+      {s.containers.length > 0 && (
+        <ChartCard title="Контейнеры · память" hint="топ-6 по нагрузке" empty={empty}>
+          <Chart {...common} lines={charts.ctMem} format={fmtBytes} />
         </ChartCard>
       )}
       {s.net.length > 1 && (
@@ -378,6 +392,9 @@ export function ServerPage() {
       </div>
       {series ? <Charts s={series} /> : <div className="charts" style={{ minHeight: 300 }} />}
 
+      {server.live?.containers && server.live.containers.length > 0 && (
+        <Containers serverId={server.id} list={server.live.containers} online={server.online} />
+      )}
       <AlertsPanel serverId={server.id} />
       <Manage server={server} />
     </main>

@@ -26,6 +26,23 @@ export interface NetIface {
   tx: number;
 }
 
+export interface Container {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  health: string;
+  cpu: number;
+  mem: number;
+  memLimit: number;
+  /** bytes/s in live samples, bytes per bucket in stored records */
+  rx: number;
+  tx: number;
+  restarts: number;
+  started: number;
+  exitCode: number;
+}
+
 export interface Sample {
   ts: number;
   cpu: number;
@@ -46,6 +63,7 @@ export interface Sample {
   rx: number;
   tx: number;
   uptime: number;
+  containers?: Container[];
 }
 
 export interface Envelope {

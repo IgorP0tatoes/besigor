@@ -261,6 +261,8 @@ export class TelegramBot implements Notifier {
             ? this.screenAlerts()
             : action === 'mu' && id
               ? this.screenMute(id)
+              : action === 'c' && id
+                ? this.screenContainers(id)
               : (action === 's' || action === 'mt' || action === 'um') && id
                 ? this.screenServer(id)
                 : this.screenMain();
@@ -357,16 +359,41 @@ export class TelegramBot implements Notifier {
       lines.push('Агент ещё не подключался.');
     }
     const firing = (this.alerts?.active() ?? []).filter((a) => a.serverId === id);
-    if (firing.length) lines.push('', '⚠️ ' + firing.map((a) => ALERT_DEFS[a.type].label).join(', '));
+    if (firing.length) lines.push('', '⚠️ ' + firing.map((a) => ALERT_DEFS[a.type].label + (a.key ? ` (${esc(a.key)})` : '')).join(', '));
     if (mute !== undefined) {
       lines.push('', mute === null ? '🔕 Алерты выключены до включения' : `🔕 Алерты заглушены до ${new Date(mute * 1000).toLocaleString('ru-RU', { timeZone: process.env.TZ || 'Europe/Moscow', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}`);
     }
     return {
       text: lines.join('\n'),
       keyboard: [
-        [{ text: '🔄 Обновить', callback_data: `s:${id}` }],
+        [
+          { text: '🔄 Обновить', callback_data: `s:${id}` },
+          ...(l?.containers?.length ? [{ text: '🐳 Контейнеры', callback_data: `c:${id}` }] : []),
+        ],
         [mute !== undefined ? { text: '🔔 Включить алерты', callback_data: `um:${id}` } : { text: '🔕 Заглушить', callback_data: `mu:${id}` }],
         [{ text: '← Серверы', callback_data: 'sl' }],
+      ],
+    };
+  }
+
+  private screenContainers(id: string) {
+    const s = this.servers().find((x) => x.id === id);
+    const list = (s?.st.online ? s.st.live?.containers : undefined) ?? [];
+    const icon = (state: string, health: string) =>
+      state !== 'running' ? (state === 'restarting' ? '🔁' : '⚫️') : health === 'unhealthy' ? '🟠' : '🟢';
+    const lines = list
+      .slice()
+      .sort((a, b) => Number(a.state === 'running') - Number(b.state === 'running') || b.cpu - a.cpu)
+      .map((c) =>
+        c.state === 'running'
+          ? `${icon(c.state, c.health)} <code>${esc(c.name)}</code> · CPU ${fmtNum(c.cpu, 1)}% · ${fmtBytes(c.mem)}`
+          : `${icon(c.state, c.health)} <code>${esc(c.name)}</code> · ${c.state}${c.state === 'exited' ? ` (${c.exitCode})` : ''}`,
+      );
+    return {
+      text: `<b>${esc(s?.name ?? '')}</b> · контейнеры\n\n${lines.join('\n') || 'Нет данных о контейнерах.'}`,
+      keyboard: [
+        [{ text: '🔄 Обновить', callback_data: `c:${id}` }],
+        [{ text: '← Сервер', callback_data: `s:${id}` }],
       ],
     };
   }
@@ -391,7 +418,7 @@ export class TelegramBot implements Notifier {
     const names = new Map(this.servers().map((s) => [s.id, s.name]));
     const now = Math.floor(Date.now() / 1000);
     const active = (this.alerts?.active() ?? []).map(
-      (a) => `⚠️ <b>${esc(names.get(a.serverId) ?? '?')}</b> · ${ALERT_DEFS[a.type].label} · ${fmtDuration(now - a.since)}`,
+      (a) => `⚠️ <b>${esc(names.get(a.serverId) ?? '?')}</b> · ${ALERT_DEFS[a.type].label}${a.key ? ` <code>${esc(a.key)}</code>` : ''} · ${fmtDuration(now - a.since)}`,
     );
     const muted = [...names.entries()].filter(([id]) => mutedUntil(this.db, id) !== undefined).map(([, n]) => `🔕 ${esc(n)}`);
     const text = ['<b>Алерты</b>', '', active.length ? active.join('\n') : 'Сейчас всё спокойно ✅', ...(muted.length ? ['', 'Заглушены:', muted.join('\n')] : [])];

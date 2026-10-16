@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/IgorP0tatoes/besigor/agent/internal/docker"
 	"github.com/IgorP0tatoes/besigor/agent/internal/metrics"
 )
 
@@ -29,10 +30,16 @@ type Client struct {
 	Version string
 	Hello   func() metrics.HostInfo
 	Buffer  *Buffer
+	Docker  *docker.Client // nil when Docker is unavailable
 
 	mu   sync.Mutex
 	conn *websocket.Conn
+
+	streamsMu sync.Mutex
+	streams   map[string]context.CancelFunc // log streams by request id
 }
+
+const maxStreams = 8
 
 // AgentURL normalises HUB_URL: https://hub → wss://hub/api/agent.
 func AgentURL(raw string) (string, error) {
@@ -152,9 +159,71 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) error {
 			if json.Unmarshal(env.D, &a) == nil {
 				c.Buffer.AckUpTo(a.UpTo)
 			}
+		case "logs":
+			var r struct {
+				Req       string `json:"req"`
+				Container string `json:"container"`
+				Tail      int    `json:"tail"`
+				Follow    bool   `json:"follow"`
+			}
+			if json.Unmarshal(env.D, &r) == nil && r.Req != "" {
+				c.startLogs(ctx, r.Req, r.Container, r.Tail, r.Follow)
+			}
+		case "logs.stop":
+			var r struct {
+				Req string `json:"req"`
+			}
+			if json.Unmarshal(env.D, &r) == nil {
+				c.stopLogs(r.Req)
+			}
 		case "config":
 			// reserved for probes (stage 8)
 		}
+	}
+}
+
+// startLogs relays a container's log to the hub until stopped or finished.
+// It lives within the connection's ctx, so a dropped link ends every stream.
+func (c *Client) startLogs(ctx context.Context, req, container string, tail int, follow bool) {
+	if tail <= 0 || tail > 1000 {
+		tail = 200
+	}
+	c.streamsMu.Lock()
+	if c.streams == nil {
+		c.streams = map[string]context.CancelFunc{}
+	}
+	if c.Docker == nil || len(c.streams) >= maxStreams {
+		c.streamsMu.Unlock()
+		msg := "docker недоступен на сервере"
+		if c.Docker != nil {
+			msg = "слишком много открытых логов"
+		}
+		_ = c.send(ctx, "logs.end", map[string]string{"req": req, "error": msg})
+		return
+	}
+	sctx, cancel := context.WithCancel(ctx)
+	c.streams[req] = cancel
+	c.streamsMu.Unlock()
+
+	go func() {
+		defer c.stopLogs(req)
+		err := c.Docker.Logs(sctx, container, tail, follow, func(lines []string) {
+			_ = c.send(sctx, "logs.data", map[string]any{"req": req, "lines": lines})
+		})
+		end := map[string]string{"req": req}
+		if err != nil {
+			end["error"] = err.Error()
+		}
+		_ = c.send(ctx, "logs.end", end)
+	}()
+}
+
+func (c *Client) stopLogs(req string) {
+	c.streamsMu.Lock()
+	defer c.streamsMu.Unlock()
+	if cancel, ok := c.streams[req]; ok {
+		cancel()
+		delete(c.streams, req)
 	}
 }
 

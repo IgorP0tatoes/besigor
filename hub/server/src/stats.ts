@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { RESOLUTION_SECONDS, type Resolution, type Sample } from './types.js';
+import { RESOLUTION_SECONDS, type Container, type Resolution, type Sample } from './types.js';
 
 const AVG_FIELDS = ['cpu', 'cpuUser', 'cpuSys', 'cpuIowait', 'cpuSteal', 'memUsed', 'memBuffCache', 'swapUsed', 'diskRead', 'diskWrite'] as const;
 
@@ -29,7 +29,28 @@ export function mergeSamples(records: Sample[], ts: number): Sample {
   for (const f of AVG_FIELDS) out[f] = round(out[f] / n, f.startsWith('cpu') ? 2 : 0);
   out.load = out.load.map((v) => round(v / n, 2)) as Sample['load'];
   out.net = [...net.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([iface, c]) => ({ iface, ...c }));
+  out.containers = mergeContainers(records);
   return out;
+}
+
+function mergeContainers(records: Sample[]): Container[] | undefined {
+  const acc = new Map<string, { n: number; cpu: number; mem: number; rx: number; tx: number; last: Container }>();
+  for (const r of records) {
+    for (const c of r.containers ?? []) {
+      const a = acc.get(c.name) ?? { n: 0, cpu: 0, mem: 0, rx: 0, tx: 0, last: c };
+      a.n++;
+      a.cpu += c.cpu;
+      a.mem += c.mem;
+      a.rx += c.rx;
+      a.tx += c.tx;
+      a.last = c;
+      acc.set(c.name, a);
+    }
+  }
+  if (!acc.size) return undefined;
+  return [...acc.values()]
+    .map((a) => ({ ...a.last, cpu: round(a.cpu / a.n, 2), mem: Math.round(a.mem / a.n), rx: a.rx, tx: a.tx }))
+    .sort((x, y) => x.name.localeCompare(y.name));
 }
 
 function round(v: number, digits: number) {
@@ -125,6 +146,7 @@ export interface Series {
   tx: number[];
   disks: { mount: string; total: number; used: (number | null)[] }[];
   net: { iface: string; rx: (number | null)[]; tx: (number | null)[] }[];
+  containers: { name: string; cpu: (number | null)[]; mem: (number | null)[] }[];
 }
 
 export function querySeries(db: DB, serverId: string, range: RangeKey, now = Math.floor(Date.now() / 1000)): Series {
@@ -136,8 +158,9 @@ export function querySeries(db: DB, serverId: string, range: RangeKey, now = Mat
   const s: Series = {
     range, step, ts: [], cpu: [], cpuUser: [], cpuSys: [], cpuIowait: [], cpuSteal: [],
     load1: [], load5: [], load15: [], memUsed: [], memBuffCache: [], memTotal: 0, swapUsed: [], swapTotal: 0,
-    diskRead: [], diskWrite: [], rx: [], tx: [], disks: [], net: [],
+    diskRead: [], diskWrite: [], rx: [], tx: [], disks: [], net: [], containers: [],
   };
+  const conts = new Map<string, Series['containers'][number]>();
   const disks = new Map<string, Series['disks'][number]>();
   const nets = new Map<string, Series['net'][number]>();
   rows.forEach((row, i) => {
@@ -166,6 +189,12 @@ export function querySeries(db: DB, serverId: string, range: RangeKey, now = Mat
       e.total = d.total;
       e.used[i] = d.used;
     }
+    for (const c of r.containers ?? []) {
+      let e = conts.get(c.name);
+      if (!e) conts.set(c.name, (e = { name: c.name, cpu: new Array(i).fill(null), mem: new Array(i).fill(null) }));
+      e.cpu[i] = c.cpu;
+      e.mem[i] = c.mem;
+    }
     for (const n of r.net ?? []) {
       let e = nets.get(n.iface);
       if (!e) nets.set(n.iface, (e = { iface: n.iface, rx: new Array(i).fill(null), tx: new Array(i).fill(null) }));
@@ -182,5 +211,14 @@ export function querySeries(db: DB, serverId: string, range: RangeKey, now = Mat
   // sparse arrays → explicit nulls so JSON keeps the gaps
   s.disks = [...disks.values()].map((d) => ({ ...d, used: Array.from(d.used, (v) => v ?? null) }));
   s.net = [...nets.values()].map((n) => ({ iface: n.iface, rx: Array.from(n.rx, (v) => v ?? null), tx: Array.from(n.tx, (v) => v ?? null) }));
+  // the busiest containers first; charts show the top few
+  const avg = (a: (number | null)[]) => a.reduce<number>((sum, v) => sum + (v ?? 0), 0) / Math.max(1, a.length);
+  s.containers = [...conts.values()]
+    .map((c) => {
+      c.cpu.length = len;
+      c.mem.length = len;
+      return { name: c.name, cpu: Array.from(c.cpu, (v) => v ?? null), mem: Array.from(c.mem, (v) => v ?? null) };
+    })
+    .sort((a, b) => avg(b.cpu) - avg(a.cpu));
   return s;
 }

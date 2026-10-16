@@ -1408,3 +1408,77 @@ input[type='range']:disabled {
     flex-direction: column;
   }
 }
+
+/* ---------- containers ---------- */
+
+.containers {
+  margin-top: 16px;
+  padding: 20px 20px 8px;
+}
+
+.ct-name {
+  font-weight: 500;
+}
+
+.ct-image {
+  font-size: 12px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag.ok {
+  color: #9ff0c6;
+  border-color: rgba(61, 214, 140, 0.3);
+  background: rgba(61, 214, 140, 0.08);
+}
+
+.warn-text {
+  color: var(--warn);
+}
+
+.logs-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.logs-follow {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dialog:has(.logs) {
+  width: min(1100px, 100%);
+}
+
+.logs {
+  height: min(62dvh, 640px);
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: #030206;
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.log-line {
+  display: flex;
+  gap: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-ts {
+  flex: none;
+  color: rgba(169, 156, 255, 0.55);
+}

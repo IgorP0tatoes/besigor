@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { FastifyBaseLogger } from 'fastify';
@@ -29,8 +30,15 @@ export interface AgentState {
 }
 
 /** Tracks connected agents and the latest live sample of every server. */
+interface LogRequest {
+  serverId: string;
+  onData: (lines: string[]) => void;
+  onEnd: (error?: string) => void;
+}
+
 export class AgentHub {
   private conns = new Map<string, AgentConn>();
+  private logReqs = new Map<string, LogRequest>();
   private latest = new Map<string, Sample>();
   private wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });
   private timer?: NodeJS.Timeout;
@@ -74,6 +82,30 @@ export class AgentHub {
     this.latest.delete(serverId);
   }
 
+  /**
+   * Asks the agent to stream a container log. Returns a stop function, or
+   * null when the server is offline.
+   */
+  requestLogs(serverId: string, container: string, tail: number, follow: boolean, onData: LogRequest['onData'], onEnd: LogRequest['onEnd']) {
+    const conn = this.conns.get(serverId);
+    if (!conn) return null;
+    const req = randomUUID();
+    this.logReqs.set(req, { serverId, onData, onEnd });
+    conn.ws.send(JSON.stringify({ t: 'logs', d: { req, container, tail, follow } }));
+    return () => {
+      if (!this.logReqs.delete(req)) return;
+      this.conns.get(serverId)?.ws.send(JSON.stringify({ t: 'logs.stop', d: { req } }));
+    };
+  }
+
+  private endLogs(serverId: string, error: string) {
+    for (const [req, r] of this.logReqs) {
+      if (r.serverId !== serverId) continue;
+      this.logReqs.delete(req);
+      r.onEnd(error);
+    }
+  }
+
   private handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     const auth = req.headers.authorization ?? '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
@@ -115,6 +147,7 @@ export class AgentHub {
       if (this.conns.get(serverId) !== conn) return; // already replaced
       this.conns.delete(serverId);
       this.touch(serverId);
+      this.endLogs(serverId, 'агент отключился');
       this.log.info({ server: name }, 'agent disconnected');
       bus.publish({ type: 'status', serverId, online: false, at: Date.now() });
     });
@@ -135,6 +168,21 @@ export class AgentHub {
         this.latest.set(serverId, sample);
         this.touch(serverId);
         bus.publish({ type: 'live', serverId, sample });
+        break;
+      }
+      case 'logs.data': {
+        const d = env.d as { req?: string; lines?: string[] };
+        const r = d?.req ? this.logReqs.get(d.req) : undefined;
+        if (r?.serverId === serverId && Array.isArray(d.lines)) r.onData(d.lines);
+        break;
+      }
+      case 'logs.end': {
+        const d = env.d as { req?: string; error?: string };
+        const r = d?.req ? this.logReqs.get(d.req) : undefined;
+        if (r?.serverId === serverId) {
+          this.logReqs.delete(d.req!);
+          r.onEnd(d.error);
+        }
         break;
       }
       case 'minute': {

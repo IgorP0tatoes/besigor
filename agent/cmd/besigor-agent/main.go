@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/IgorP0tatoes/besigor/agent/internal/docker"
 	"github.com/IgorP0tatoes/besigor/agent/internal/hub"
 	"github.com/IgorP0tatoes/besigor/agent/internal/metrics"
 )
@@ -47,8 +48,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	dk := docker.New()
+	if dk == nil {
+		slog.Info("docker socket not found, container monitoring disabled")
+	}
 	client := &hub.Client{
-		URL: hubURL, Token: token, Version: version, Buffer: &hub.Buffer{},
+		URL: hubURL, Token: token, Version: version, Buffer: &hub.Buffer{}, Docker: dk,
 		Hello: func() metrics.HostInfo { return metrics.ReadHostInfo(paths, version) },
 	}
 	go client.Run(ctx)
@@ -70,6 +75,13 @@ func main() {
 		next = now.Truncate(interval).Add(interval)
 
 		iv := sampler.Collect(now)
+		if dk != nil {
+			if list, err := dk.Collect(ctx); err == nil {
+				iv.Live.Containers = list
+			} else {
+				slog.Debug("docker collect failed", "err", err)
+			}
+		}
 		client.SendLive(ctx, iv.Live)
 		if rec, ok := agg.Add(iv); ok {
 			client.Buffer.Push(rec)
@@ -84,9 +96,13 @@ func printSample() {
 	paths := metrics.DefaultPaths()
 	s := metrics.NewSampler(paths)
 	time.Sleep(2 * time.Second)
+	live := s.Collect(time.Now()).Live
+	if dk := docker.New(); dk != nil {
+		live.Containers, _ = dk.Collect(context.Background())
+	}
 	out := map[string]any{
 		"hello": metrics.ReadHostInfo(paths, version),
-		"live":  s.Collect(time.Now()).Live,
+		"live":  live,
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

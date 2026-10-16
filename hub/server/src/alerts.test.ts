@@ -71,3 +71,29 @@ test('offline alert and recovery; mute suppresses messages', () => {
   assert.equal(engine.active().length, 1, 'but the state is still tracked');
   engine.stop();
 });
+
+test('container stop and restart loop alerts', () => {
+  const { sent, engine } = setup();
+  const t0 = 1_700_000_000;
+  const ct = (state: string, restarts = 0, id = 'abc') => ({
+    id, name: 'remnawave', image: 'x', state, health: '', cpu: 1, mem: 1, memLimit: 0, rx: 0, tx: 0, restarts, started: 0, exitCode: state === 'exited' ? 137 : 0,
+  });
+  const push = (t: number, c: ReturnType<typeof ct>) => bus.publish({ type: 'live', serverId: 's1', sample: { ...sample(t, 1), containers: [c] } });
+
+  push(t0, ct('running'));
+  push(t0 + 10, ct('exited'));
+  engine.tick(t0 + 30);
+  assert.equal(sent.length, 0, 'grace period of 1 min');
+  push(t0 + 70, ct('exited'));
+  engine.tick(t0 + 75);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]!.text, /remnawave.*остановился.*137/);
+  push(t0 + 80, ct('running'));
+  engine.tick(t0 + 85);
+  assert.match(sent[1]!.text, /снова работает/);
+
+  for (let i = 1; i <= 3; i++) push(t0 + 90 + i * 30, ct('running', i));
+  engine.tick(t0 + 200);
+  assert.match(sent[2]!.text, /по кругу · 3 раз/);
+  engine.stop();
+});
